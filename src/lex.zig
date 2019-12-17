@@ -188,15 +188,15 @@ pub const Lexer = struct {
         LongComment,
         LongCommentPossibleEnd,
         Number,
+        CompoundEqual,
     };
 
     pub fn next(self: *Lexer) LexError!Token {
         const start_index = self.index;
         if (veryVerboseLexing) {
             if (self.index < self.buffer.len) {
-                std.debug.warn("{}:'{c}'", .{self.index, self.buffer[self.index]});
-            }
-            else {
+                std.debug.warn("{}:'{c}'", .{ self.index, self.buffer[self.index] });
+            } else {
                 std.debug.warn("eof", .{});
             }
         }
@@ -235,7 +235,11 @@ pub const Lexer = struct {
                         result.id = Token.Id.String;
                     },
                     '.' => {
+                        // this could be the start of .., ..., or a single .
                         state = State.Dot;
+                    },
+                    '>', '<', '~', '=' => {
+                        state = State.CompoundEqual;
                     },
                     else => {
                         result.id = Token.Id.SingleChar;
@@ -363,6 +367,23 @@ pub const Lexer = struct {
                         break;
                     },
                 },
+                State.CompoundEqual => switch (c) {
+                    '=' => {
+                        switch (self.buffer[self.index - 1]) {
+                            '>' => result.id = Token.Id.GE,
+                            '<' => result.id = Token.Id.LE,
+                            '~' => result.id = Token.Id.NE,
+                            '=' => result.id = Token.Id.EQ,
+                            else => unreachable,
+                        }
+                        self.index += 1;
+                        break;
+                    },
+                    else => {
+                        result.id = Token.Id.SingleChar;
+                        break;
+                    },
+                },
             }
         } else {
             // this will always be true due to the while loop condition
@@ -378,6 +399,7 @@ pub const Lexer = struct {
                 },
                 State.Dot,
                 State.Dash,
+                State.CompoundEqual,
                 => {
                     result.id = Token.Id.SingleChar;
                 },
@@ -404,9 +426,8 @@ pub const Lexer = struct {
 
         if (veryVerboseLexing) {
             if (self.index < self.buffer.len) {
-                std.debug.warn(":{}:'{c}'=\"{}\"\n", .{self.index, self.buffer[self.index], self.buffer[result.start..self.index]});
-            }
-            else {
+                std.debug.warn(":{}:'{c}'=\"{}\"\n", .{ self.index, self.buffer[self.index], self.buffer[result.start..self.index] });
+            } else {
                 std.debug.warn(":eof=\"{}\"\n", .{self.buffer[result.start..self.index]});
             }
         }
@@ -471,6 +492,29 @@ test "dots, concat, ellipsis" {
         Token.Id.Name,
         Token.Id.SingleChar,
         Token.Id.Keyword_true,
+    });
+}
+
+test "= and compound = operators" {
+    try testLex("=", &[_]Token.Id{Token.Id.SingleChar});
+    try testLex("a=b", &[_]Token.Id{ Token.Id.Name, Token.Id.SingleChar, Token.Id.Name });
+    try testLex("a==b", &[_]Token.Id{ Token.Id.Name, Token.Id.EQ, Token.Id.Name });
+    try testLex(">=", &[_]Token.Id{Token.Id.GE});
+    try testLex("if a~=b and a<=b and b<a then end", &[_]Token.Id{
+        Token.Id.Keyword_if,
+        Token.Id.Name,
+        Token.Id.NE,
+        Token.Id.Name,
+        Token.Id.Keyword_and,
+        Token.Id.Name,
+        Token.Id.LE,
+        Token.Id.Name,
+        Token.Id.Keyword_and,
+        Token.Id.Name,
+        Token.Id.SingleChar,
+        Token.Id.Name,
+        Token.Id.Keyword_then,
+        Token.Id.Keyword_end,
     });
 }
 

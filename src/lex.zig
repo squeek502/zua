@@ -19,6 +19,7 @@ const std = @import("std");
 // kept in this implementation.
 
 const dumpTokensDuringTests = true;
+const veryVerboseLexing = false;
 
 pub const Token = struct {
     id: Id,
@@ -179,15 +180,26 @@ pub const Lexer = struct {
         StringLiteral,
         StringLiteralBackslash,
         Dash,
+        Dot,
+        Concat,
         CommentStart,
         LongCommentStart,
         ShortComment,
         LongComment,
         LongCommentPossibleEnd,
+        Number,
     };
 
     pub fn next(self: *Lexer) LexError!Token {
         const start_index = self.index;
+        if (veryVerboseLexing) {
+            if (self.index < self.buffer.len) {
+                std.debug.warn("{}:'{c}'", .{self.index, self.buffer[self.index]});
+            }
+            else {
+                std.debug.warn("eof", .{});
+            }
+        }
         var result = Token{
             .id = Token.Id.Eof,
             .start = start_index,
@@ -199,6 +211,7 @@ pub const Lexer = struct {
         var expected_long_string_sep_count: u32 = 0;
         while (self.index < self.buffer.len) : (self.index += 1) {
             const c = self.buffer[self.index];
+            if (veryVerboseLexing) std.debug.warn(":{}", .{@tagName(state)});
             switch (state) {
                 State.Start => switch (c) {
                     '\n', '\r' => {
@@ -220,6 +233,9 @@ pub const Lexer = struct {
                         state = State.StringLiteral;
                         string_literal_delim = c;
                         result.id = Token.Id.String;
+                    },
+                    '.' => {
+                        state = State.Dot;
                     },
                     else => {
                         result.id = Token.Id.SingleChar;
@@ -315,10 +331,43 @@ pub const Lexer = struct {
                     },
                     else => {},
                 },
+                State.Dot => switch (c) {
+                    '.' => {
+                        state = State.Concat;
+                    },
+                    '0'...'9' => {
+                        state = State.Number;
+                    },
+                    else => {
+                        result.id = Token.Id.SingleChar;
+                        break;
+                    },
+                },
+                State.Concat => switch (c) {
+                    '.' => {
+                        result.id = Token.Id.Ellipsis;
+                        // include this .
+                        self.index += 1;
+                        break;
+                    },
+                    else => {
+                        result.id = Token.Id.Concat;
+                        break;
+                    },
+                },
+                State.Number => switch (c) {
+                    // TODO: proper handling, this is a placeholder
+                    '0'...'9' => {},
+                    else => {
+                        result.id = Token.Id.Number;
+                        break;
+                    },
+                },
             }
-        // while loop didn't break + we are at EOF
-        // TODO is this if check redundant?
-        } else if (self.index == self.buffer.len) {
+        } else {
+            // this will always be true due to the while loop condition
+            // as the else block is only evaluated after a break; in the while loop
+            std.debug.assert(self.index == self.buffer.len);
             switch (state) {
                 State.Start => {},
                 State.Identifier => {
@@ -327,8 +376,16 @@ pub const Lexer = struct {
                         result.id = id;
                     }
                 },
-                State.Dash => {
+                State.Dot,
+                State.Dash,
+                => {
                     result.id = Token.Id.SingleChar;
+                },
+                State.Concat => {
+                    result.id = Token.Id.Concat;
+                },
+                State.Number => {
+                    result.id = Token.Id.Number;
                 },
                 State.CommentStart,
                 State.ShortComment,
@@ -342,6 +399,15 @@ pub const Lexer = struct {
                 State.StringLiteral,
                 State.StringLiteralBackslash,
                 => return LexError.UnfinishedString,
+            }
+        }
+
+        if (veryVerboseLexing) {
+            if (self.index < self.buffer.len) {
+                std.debug.warn(":{}:'{c}'=\"{}\"\n", .{self.index, self.buffer[self.index], self.buffer[result.start..self.index]});
+            }
+            else {
+                std.debug.warn(":eof=\"{}\"\n", .{self.buffer[result.start..self.index]});
             }
         }
 
@@ -359,7 +425,7 @@ pub const Lexer = struct {
 };
 
 test "hello \"world\"" {
-    try testTokenize("local hello = \"wor\\\"ld\"", &[_]Token.Id{
+    try testLex("local hello = \"wor\\\"ld\"", &[_]Token.Id{
         Token.Id.Keyword_local,
         Token.Id.Name,
         Token.Id.SingleChar,
@@ -368,7 +434,7 @@ test "hello \"world\"" {
 }
 
 test "hello 'world'" {
-    try testTokenize("local hello = 'wor\\'ld'", &[_]Token.Id{
+    try testLex("local hello = 'wor\\'ld'", &[_]Token.Id{
         Token.Id.Keyword_local,
         Token.Id.Name,
         Token.Id.SingleChar,
@@ -376,42 +442,67 @@ test "hello 'world'" {
     });
 }
 
-test "comments" {
-    try testTokenize("-", &[_]Token.Id{Token.Id.SingleChar});
-    try testTokenize("--", &[_]Token.Id{});
-    try testTokenize("--local hello = 'wor\\'ld'", &[_]Token.Id{});
-    try testTokenize("--[this is a short comment\nreturn", &[_]Token.Id{Token.Id.Keyword_return});
-    try testTokenize("--[[local hello = 'wor\\'ld']]", &[_]Token.Id{});
-    try testTokenize("--[==[\nlocal\nhello\n=\n'world'\n]==]", &[_]Token.Id{});
+test "comments and dashes" {
+    try testLex("-", &[_]Token.Id{Token.Id.SingleChar});
+    try testLex("a-b", &[_]Token.Id{ Token.Id.Name, Token.Id.SingleChar, Token.Id.Name });
+    try testLex("--", &[_]Token.Id{});
+    try testLex("--local hello = 'wor\\'ld'", &[_]Token.Id{});
+    try testLex("--[this is a short comment\nreturn", &[_]Token.Id{Token.Id.Keyword_return});
+    try testLex("--[[local hello = 'wor\\'ld']]", &[_]Token.Id{});
+    try testLex("--[==[\nlocal\nhello\n=\n'world'\n]==]", &[_]Token.Id{});
+}
+
+test "dots, concat, ellipsis" {
+    try testLex(".", &[_]Token.Id{Token.Id.SingleChar});
+    try testLex("a.b", &[_]Token.Id{ Token.Id.Name, Token.Id.SingleChar, Token.Id.Name });
+    try testLex("..", &[_]Token.Id{Token.Id.Concat});
+    try testLex("a..b.c", &[_]Token.Id{
+        Token.Id.Name,
+        Token.Id.Concat,
+        Token.Id.Name,
+        Token.Id.SingleChar,
+        Token.Id.Name,
+    });
+    // this is valid Lua, apparently (abc will be true, test will be the first value in ...)
+    try testLex("test=...abc=true", &[_]Token.Id{
+        Token.Id.Name,
+        Token.Id.SingleChar,
+        Token.Id.Ellipsis,
+        Token.Id.Name,
+        Token.Id.SingleChar,
+        Token.Id.Keyword_true,
+    });
 }
 
 test "LexError.UnfinishedLongComment" {
-    const simple = testTokenize("--[[", &[_]Token.Id{});
+    const simple = testLex("--[[", &[_]Token.Id{});
     std.testing.expectError(LexError.UnfinishedLongComment, simple);
 
-    const mismatchedSep = testTokenize("--[==[ ]=]", &[_]Token.Id{});
+    const mismatchedSep = testLex("--[==[ ]=]", &[_]Token.Id{});
     std.testing.expectError(LexError.UnfinishedLongComment, mismatchedSep);
 }
 
 test "LexError.UnfinishedString" {
-    const missingQuoteResult = testTokenize("local hello = \"wor\\\"ld", &[_]Token.Id{
+    const missingQuoteResult = testLex("local hello = \"wor\\\"ld", &[_]Token.Id{
         Token.Id.Keyword_local,
         Token.Id.Name,
         Token.Id.SingleChar,
         Token.Id.String,
     });
+    if (veryVerboseLexing) std.debug.warn("\n", .{});
     std.testing.expectError(LexError.UnfinishedString, missingQuoteResult);
 
-    const newlineResult = testTokenize("local hello = \"wor\\\"ld\n\"", &[_]Token.Id{
+    const newlineResult = testLex("local hello = \"wor\\\"ld\n\"", &[_]Token.Id{
         Token.Id.Keyword_local,
         Token.Id.Name,
         Token.Id.SingleChar,
         Token.Id.String,
     });
+    if (veryVerboseLexing) std.debug.warn("\n", .{});
     std.testing.expectError(LexError.UnfinishedString, newlineResult);
 }
 
-fn testTokenize(source: []const u8, expected_tokens: []const Token.Id) !void {
+fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
     var lexer = Lexer.init(source);
     if (dumpTokensDuringTests and expected_tokens.len > 0) std.debug.warn("\n", .{});
     for (expected_tokens) |expected_token_id| {

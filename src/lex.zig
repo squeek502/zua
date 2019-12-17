@@ -104,9 +104,32 @@ pub const Token = struct {
         Eof,
     };
 
-    pub fn tokenName(id: Id) []const u8 {
+    pub fn nameForDisplay(id: Id) []const u8 {
         return switch (id) {
-            (.Keyword_and)...(.Keyword_while) => keywords[id].name,
+            .Keyword_and,
+            .Keyword_break,
+            .Keyword_do,
+            .Keyword_else,
+            .Keyword_elseIf,
+            .Keyword_end,
+            .Keyword_false,
+            .Keyword_for,
+            .Keyword_function,
+            .Keyword_if,
+            .Keyword_in,
+            .Keyword_local,
+            .Keyword_nil,
+            .Keyword_not,
+            .Keyword_or,
+            .Keyword_repeat,
+            .Keyword_return,
+            .Keyword_then,
+            .Keyword_true,
+            .Keyword_until,
+            .Keyword_while,
+            // FIXME: This relies on the keywords array and Id enum to be in the exact same
+            // order which isnt ideal
+            => keywords[@enumToInt(id)].name,
             .Concat => "..",
             .Ellipsis => "...",
             .EQ => "==",
@@ -117,8 +140,7 @@ pub const Token = struct {
             .Name => "<name>",
             .String => "<string>",
             .Eof => "<eof>",
-            // need more context to give the name of this
-            .SingleChar => unreachable,
+            .SingleChar => "<char>",
         };
     }
 };
@@ -137,7 +159,7 @@ pub const Lexer = struct {
     }
 
     pub fn dump(self: *Lexer, token: *const Token) void {
-        std.debug.warn("{} \"{}\"\n", .{ @tagName(token.id), self.buffer[token.start..token.end] });
+        std.debug.warn("{} {} \"{}\"\n", .{ @tagName(token.id), Token.nameForDisplay(token.id), self.buffer[token.start..token.end] });
     }
 
     const State = enum {
@@ -213,6 +235,7 @@ pub const Lexer = struct {
                 },
             }
         // while loop didn't break + we are at EOF
+        // TODO is this if check redundant?
         } else if (self.index == self.buffer.len) {
             switch (state) {
                 State.Start => {},

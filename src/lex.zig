@@ -9,6 +9,14 @@ const std = @import("std");
 // every other multi-character token uses ID >= 257 (see FIRST_RESERVED in llex.h).
 // For now, this implementation uses a 'SingleChar' token as a catch-all for
 // such single char tokens
+//
+// Lua's lexer uses a lua_State and parses strings/numbers while lexing, allocating
+// strings and adding them to the lua_State's string table. This lexer, instead,
+// does no allocation or parsing of strings/numbers (that will be done later).
+// TODO: is this too big of a deviation?
+//
+// Lua's lexer skips over all comments (doesn't store them as tokens). This functionality is
+// kept in this implementation.
 
 const dumpTokensDuringTests = true;
 
@@ -145,7 +153,10 @@ pub const Token = struct {
     }
 };
 
-pub const LexError = error{UnfinishedString};
+pub const LexError = error{
+    UnfinishedString,
+    UnfinishedLongComment,
+};
 
 pub const Lexer = struct {
     buffer: []const u8,
@@ -167,6 +178,12 @@ pub const Lexer = struct {
         Identifier,
         StringLiteral,
         StringLiteralBackslash,
+        Dash,
+        CommentStart,
+        LongCommentStart,
+        ShortComment,
+        LongComment,
+        LongCommentPossibleEnd,
     };
 
     pub fn next(self: *Lexer) LexError!Token {
@@ -178,6 +195,8 @@ pub const Lexer = struct {
         };
         var state = State.Start;
         var string_literal_delim: u8 = undefined;
+        var long_string_sep_count: u32 = 0;
+        var expected_long_string_sep_count: u32 = 0;
         while (self.index < self.buffer.len) : (self.index += 1) {
             const c = self.buffer[self.index];
             switch (state) {
@@ -188,6 +207,10 @@ pub const Lexer = struct {
                     ' ', '\t' => {
                         // skip whitespace
                         result.start = self.index + 1;
+                    },
+                    '-' => {
+                        // this could be the start of a comment, a long comment, or a single -
+                        state = State.Dash;
                     },
                     'a'...'z', 'A'...'Z', '_' => {
                         state = State.Identifier;
@@ -233,6 +256,65 @@ pub const Lexer = struct {
                         state = State.StringLiteral;
                     },
                 },
+                State.Dash => switch (c) {
+                    '-' => {
+                        state = State.CommentStart;
+                    },
+                    else => {
+                        result.id = Token.Id.SingleChar;
+                        break;
+                    },
+                },
+                State.CommentStart => switch (c) {
+                    '[' => {
+                        state = State.LongCommentStart;
+                        expected_long_string_sep_count = 0;
+                    },
+                    else => {
+                        state = State.ShortComment;
+                    },
+                },
+                State.LongCommentStart => switch (c) {
+                    '=' => {
+                        expected_long_string_sep_count += 1;
+                    },
+                    '[' => {
+                        state = State.LongComment;
+                    },
+                    else => {
+                        state = State.ShortComment;
+                    },
+                },
+                State.LongComment => switch (c) {
+                    ']' => {
+                        state = State.LongCommentPossibleEnd;
+                        long_string_sep_count = 0;
+                    },
+                    else => {},
+                },
+                State.LongCommentPossibleEnd => switch (c) {
+                    ']' => {
+                        if (long_string_sep_count == expected_long_string_sep_count) {
+                            result.start = self.index + 1;
+                            state = State.Start;
+                        } else {
+                            state = State.LongComment;
+                        }
+                    },
+                    '=' => {
+                        long_string_sep_count += 1;
+                    },
+                    else => {
+                        state = State.LongComment;
+                    },
+                },
+                State.ShortComment => switch (c) {
+                    '\n', '\r' => {
+                        result.start = self.index + 1;
+                        state = State.Start;
+                    },
+                    else => {},
+                },
             }
         // while loop didn't break + we are at EOF
         // TODO is this if check redundant?
@@ -245,6 +327,18 @@ pub const Lexer = struct {
                         result.id = id;
                     }
                 },
+                State.Dash => {
+                    result.id = Token.Id.SingleChar;
+                },
+                State.CommentStart,
+                State.ShortComment,
+                State.LongCommentStart,
+                => {
+                    result.start = self.index;
+                },
+                State.LongCommentPossibleEnd,
+                State.LongComment,
+                => return LexError.UnfinishedLongComment,
                 State.StringLiteral,
                 State.StringLiteralBackslash,
                 => return LexError.UnfinishedString,
@@ -282,6 +376,23 @@ test "hello 'world'" {
     });
 }
 
+test "comments" {
+    try testTokenize("-", &[_]Token.Id{Token.Id.SingleChar});
+    try testTokenize("--", &[_]Token.Id{});
+    try testTokenize("--local hello = 'wor\\'ld'", &[_]Token.Id{});
+    try testTokenize("--[this is a short comment\nreturn", &[_]Token.Id{Token.Id.Keyword_return});
+    try testTokenize("--[[local hello = 'wor\\'ld']]", &[_]Token.Id{});
+    try testTokenize("--[==[\nlocal\nhello\n=\n'world'\n]==]", &[_]Token.Id{});
+}
+
+test "LexError.UnfinishedLongComment" {
+    const simple = testTokenize("--[[", &[_]Token.Id{});
+    std.testing.expectError(LexError.UnfinishedLongComment, simple);
+
+    const mismatchedSep = testTokenize("--[==[ ]=]", &[_]Token.Id{});
+    std.testing.expectError(LexError.UnfinishedLongComment, mismatchedSep);
+}
+
 test "LexError.UnfinishedString" {
     const missingQuoteResult = testTokenize("local hello = \"wor\\\"ld", &[_]Token.Id{
         Token.Id.Keyword_local,
@@ -302,7 +413,7 @@ test "LexError.UnfinishedString" {
 
 fn testTokenize(source: []const u8, expected_tokens: []const Token.Id) !void {
     var lexer = Lexer.init(source);
-    if (dumpTokensDuringTests) std.debug.warn("\n", .{});
+    if (dumpTokensDuringTests and expected_tokens.len > 0) std.debug.warn("\n", .{});
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);

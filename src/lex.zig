@@ -169,6 +169,7 @@ pub const LexError = error{
     UnfinishedLongComment,
     UnfinishedLongString,
     InvalidLongStringDelimiter,
+    MalformedNumber,
     EscapeSequenceTooLarge,
 };
 
@@ -222,11 +223,11 @@ pub const Lexer = struct {
             .end = undefined,
         };
         var state = State.Start;
-        var string_literal_delim: u8 = undefined;
-        var long_string_sep_count: u32 = 0;
-        var expected_long_string_sep_count: u32 = 0;
-        var string_literal_escape_n: u32 = 0;
-        var string_literal_escape_i: u8 = 0;
+        var string_delim: u8 = undefined;
+        var string_level: u32 = 0;
+        var expected_string_level: u32 = 0;
+        var string_escape_n: u32 = 0;
+        var string_escape_i: u8 = 0;
         while (self.index < self.buffer.len) : (self.index += 1) {
             const c = self.buffer[self.index];
             if (veryVerboseLexing) std.debug.warn(":{}", .{@tagName(state)});
@@ -253,7 +254,7 @@ pub const Lexer = struct {
                     },
                     '"', '\'' => {
                         state = State.StringLiteral;
-                        string_literal_delim = c;
+                        string_delim = c;
                         result.id = Token.Id.String;
                     },
                     '.' => {
@@ -265,7 +266,7 @@ pub const Lexer = struct {
                     },
                     '[' => {
                         state = State.LongStringStart;
-                        expected_long_string_sep_count = 0;
+                        expected_string_level = 0;
                     },
                     else => {
                         result.id = Token.Id.SingleChar;
@@ -286,11 +287,11 @@ pub const Lexer = struct {
                 State.StringLiteral => switch (c) {
                     '\\' => {
                         state = State.StringLiteralBackslash;
-                        string_literal_escape_i = 0;
-                        string_literal_escape_n = 0;
+                        string_escape_i = 0;
+                        string_escape_n = 0;
                     },
                     '"', '\'' => {
-                        if (c == string_literal_delim) {
+                        if (c == string_delim) {
                             self.index += 1;
                             break;
                         }
@@ -303,20 +304,20 @@ pub const Lexer = struct {
                     '0'...'9' => {
                         // Validate that any \ddd escape sequences can actually fit
                         // in a byte
-                        string_literal_escape_n = 10 * string_literal_escape_n + (c-'0');
-                        string_literal_escape_i += 1;
-                        if (string_literal_escape_i == 3) {
-                            if (string_literal_escape_n > std.math.maxInt(u8)) {
+                        string_escape_n = 10 * string_escape_n + (c - '0');
+                        string_escape_i += 1;
+                        if (string_escape_i == 3) {
+                            if (string_escape_n > std.math.maxInt(u8)) {
                                 return LexError.EscapeSequenceTooLarge;
                             }
                             state = State.StringLiteral;
                         }
                     },
                     else => {
-                        if (string_literal_escape_i > 0) {
-                            // if the escape sequence had any digits, then
-                            // we need to backtrack so as not to escape the next
-                            // character (since the digits are the things being escaped)
+                        // if the escape sequence had any digits, then
+                        // we need to backtrack so as not to escape the current
+                        // character (since the digits are the things being escaped)
+                        if (string_escape_i > 0) {
                             self.index -= 1;
                         }
                         state = State.StringLiteral;
@@ -334,7 +335,7 @@ pub const Lexer = struct {
                 State.CommentStart => switch (c) {
                     '[' => {
                         state = State.LongCommentStart;
-                        expected_long_string_sep_count = 0;
+                        expected_string_level = 0;
                     },
                     else => {
                         state = State.ShortComment;
@@ -344,7 +345,7 @@ pub const Lexer = struct {
                 State.LongCommentStart,
                 => switch (c) {
                     '=' => {
-                        expected_long_string_sep_count += 1;
+                        expected_string_level += 1;
                     },
                     '[' => {
                         state = if (state == State.LongCommentStart) State.LongComment else State.LongString;
@@ -361,7 +362,7 @@ pub const Lexer = struct {
                         // - Long strings with no sep chars is unaffected: [] does not give this error
                         //   (instead it will an give unexpected symbol error while parsing)
                         if (state == State.LongStringStart) {
-                            if (expected_long_string_sep_count > 0) {
+                            if (expected_string_level > 0) {
                                 return LexError.InvalidLongStringDelimiter;
                             } else {
                                 result.id = Token.Id.SingleChar;
@@ -389,7 +390,7 @@ pub const Lexer = struct {
                 => switch (c) {
                     ']' => {
                         state = if (state == State.LongComment) State.LongCommentPossibleEnd else State.LongStringPossibleEnd;
-                        long_string_sep_count = 0;
+                        string_level = 0;
                     },
                     else => {},
                 },
@@ -397,7 +398,7 @@ pub const Lexer = struct {
                 State.LongCommentPossibleEnd,
                 => switch (c) {
                     ']' => {
-                        if (long_string_sep_count == expected_long_string_sep_count) {
+                        if (string_level == expected_string_level) {
                             if (state == State.LongCommentPossibleEnd) {
                                 result.start = self.index + 1;
                                 state = State.Start;
@@ -411,7 +412,7 @@ pub const Lexer = struct {
                         }
                     },
                     '=' => {
-                        long_string_sep_count += 1;
+                        string_level += 1;
                     },
                     else => {
                         state = if (state == State.LongCommentPossibleEnd) State.LongComment else State.LongString;
@@ -637,6 +638,21 @@ test "= and compound = operators" {
         Token.Id.Keyword_then,
         Token.Id.Keyword_end,
     });
+}
+
+test "LexError.MalformedNumber" {
+    //std.testing.expectError(LexError.MalformedNumber, testLex("1e", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0z", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0x", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0xabcz", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("1xabc", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0.1.e2", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0.1.", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0.1.2", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0.1e3a", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0.1e-", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0.1e-a", &[_]Token.Id{Token.Id.Number}));
+    //std.testing.expectError(LexError.MalformedNumber, testLex("0.1e+", &[_]Token.Id{Token.Id.Number}));
 }
 
 test "LexError.InvalidLongStringDelimiter" {

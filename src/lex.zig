@@ -169,6 +169,7 @@ pub const LexError = error{
     UnfinishedLongComment,
     UnfinishedLongString,
     InvalidLongStringDelimiter,
+    EscapeSequenceTooLarge,
 };
 
 pub const Lexer = struct {
@@ -224,6 +225,8 @@ pub const Lexer = struct {
         var string_literal_delim: u8 = undefined;
         var long_string_sep_count: u32 = 0;
         var expected_long_string_sep_count: u32 = 0;
+        var string_literal_escape_n: u32 = 0;
+        var string_literal_escape_i: u8 = 0;
         while (self.index < self.buffer.len) : (self.index += 1) {
             const c = self.buffer[self.index];
             if (veryVerboseLexing) std.debug.warn(":{}", .{@tagName(state)});
@@ -243,6 +246,10 @@ pub const Lexer = struct {
                     'a'...'z', 'A'...'Z', '_' => {
                         state = State.Identifier;
                         result.id = Token.Id.Name;
+                    },
+                    '0'...'9' => {
+                        state = State.Number;
+                        result.id = Token.Id.Number;
                     },
                     '"', '\'' => {
                         state = State.StringLiteral;
@@ -279,6 +286,8 @@ pub const Lexer = struct {
                 State.StringLiteral => switch (c) {
                     '\\' => {
                         state = State.StringLiteralBackslash;
+                        string_literal_escape_i = 0;
+                        string_literal_escape_n = 0;
                     },
                     '"', '\'' => {
                         if (c == string_literal_delim) {
@@ -291,7 +300,25 @@ pub const Lexer = struct {
                 },
                 State.StringLiteralBackslash => switch (c) {
                     '\n', '\r' => return LexError.UnfinishedString,
+                    '0'...'9' => {
+                        // Validate that any \ddd escape sequences can actually fit
+                        // in a byte
+                        string_literal_escape_n = 10 * string_literal_escape_n + (c-'0');
+                        string_literal_escape_i += 1;
+                        if (string_literal_escape_i == 3) {
+                            if (string_literal_escape_n > std.math.maxInt(u8)) {
+                                return LexError.EscapeSequenceTooLarge;
+                            }
+                            state = State.StringLiteral;
+                        }
+                    },
                     else => {
+                        if (string_literal_escape_i > 0) {
+                            // if the escape sequence had any digits, then
+                            // we need to backtrack so as not to escape the next
+                            // character (since the digits are the things being escaped)
+                            self.index -= 1;
+                        }
                         state = State.StringLiteral;
                     },
                 },
@@ -477,8 +504,7 @@ pub const Lexer = struct {
                 => {
                     result.start = self.index;
                 },
-                State.LongStringStart,
-                => {
+                State.LongStringStart => {
                     // fall back to a single [ token since there's no
                     // way this could be a valid multiline string start anymore
                     result.id = Token.Id.SingleChar;
@@ -536,11 +562,21 @@ test "hello 'world'" {
     });
 }
 
+test "strings" {
+    // none of these escaped chars have any meaning, but Lua allows
+    // any character to be escaped so this should lex just fine
+    try testLex("'\\e\\s\\c\\ any char'", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\1'", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\12'", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\123'", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\1234'", &[_]Token.Id{Token.Id.String});
+}
+
 test "long strings" {
     try testLex("[[]]", &[_]Token.Id{Token.Id.String});
     try testLex("[===[\nhello\nworld\n]===]", &[_]Token.Id{Token.Id.String});
-    try testLex("[==", &[_]Token.Id{Token.Id.SingleChar, Token.Id.EQ});
-    try testLex("[]", &[_]Token.Id{Token.Id.SingleChar, Token.Id.SingleChar});
+    try testLex("[==", &[_]Token.Id{ Token.Id.SingleChar, Token.Id.EQ });
+    try testLex("[]", &[_]Token.Id{ Token.Id.SingleChar, Token.Id.SingleChar });
     // TODO: this depends on LUA_COMPAT_LSTR
     try testLex("[[ [[ ]]", &[_]Token.Id{Token.Id.String});
     // this is always allowed
@@ -607,6 +643,10 @@ test "LexError.InvalidLongStringDelimiter" {
     // see comment in Lexer.next near the return of LexError.InvalidLongStringDelimiter
     const simple = testLex("[==]", &[_]Token.Id{Token.Id.String});
     std.testing.expectError(LexError.InvalidLongStringDelimiter, simple);
+}
+
+test "LexError.EscapeSequenceTooLarge" {
+    std.testing.expectError(LexError.EscapeSequenceTooLarge, testLex("'\\256'", &[_]Token.Id{Token.Id.String}));
 }
 
 test "LexError.UnfinishedLongComment" {

@@ -18,8 +18,13 @@ const std = @import("std");
 // Lua's lexer skips over all comments (doesn't store them as tokens). This functionality is
 // kept in this implementation.
 
+// Debug/test output
 const dumpTokensDuringTests = true;
 const veryVerboseLexing = false;
+
+// TODO: implement or ignore this (options for handling nesting of [[]] in multiline strings)
+// for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
+const LUA_COMPAT_LSTR = 0;
 
 pub const Token = struct {
     id: Id,
@@ -157,6 +162,8 @@ pub const Token = struct {
 pub const LexError = error{
     UnfinishedString,
     UnfinishedLongComment,
+    UnfinishedLongString,
+    InvalidLongStringDelimiter,
 };
 
 pub const Lexer = struct {
@@ -183,10 +190,13 @@ pub const Lexer = struct {
         Dot,
         Concat,
         CommentStart,
-        LongCommentStart,
         ShortComment,
+        LongCommentStart,
         LongComment,
         LongCommentPossibleEnd,
+        LongStringStart,
+        LongString,
+        LongStringPossibleEnd,
         Number,
         CompoundEqual,
     };
@@ -241,6 +251,10 @@ pub const Lexer = struct {
                     '>', '<', '~', '=' => {
                         state = State.CompoundEqual;
                     },
+                    '[' => {
+                        state = State.LongStringStart;
+                        expected_long_string_sep_count = 0;
+                    },
                     else => {
                         result.id = Token.Id.SingleChar;
                         self.index += 1;
@@ -294,38 +308,81 @@ pub const Lexer = struct {
                         state = State.ShortComment;
                     },
                 },
-                State.LongCommentStart => switch (c) {
+                State.LongStringStart,
+                State.LongCommentStart,
+                => switch (c) {
                     '=' => {
                         expected_long_string_sep_count += 1;
                     },
                     '[' => {
-                        state = State.LongComment;
+                        state = if (state == State.LongCommentStart) State.LongComment else State.LongString;
+                    },
+                    ']' => {
+                        // Lua makes the pattern [=], [==], etc an explicit
+                        // 'invalid long string delimiter' error instead of discarding
+                        // its long-string-ness and parsing the tokens as normal
+                        //
+                        // - This is only true of long strings: long comments handle --[==] just fine
+                        //   since it falls back to -- (short comment)
+                        // - The end of long strings is unaffected: [=[str]=[ does not give this error
+                        //   (instead the string will just not be finished)
+                        // - Long strings with no sep chars is unaffected: [] does not give this error
+                        //   (instead it will an give unexpected symbol error while parsing)
+                        if (state == State.LongStringStart) {
+                            if (expected_long_string_sep_count > 0) {
+                                return LexError.InvalidLongStringDelimiter;
+                            } else {
+                                result.id = Token.Id.SingleChar;
+                                break;
+                            }
+                        } else {
+                            state = State.ShortComment;
+                        }
                     },
                     else => {
-                        state = State.ShortComment;
+                        if (state == State.LongCommentStart) {
+                            state = State.ShortComment;
+                        } else {
+                            // fall back to a single [ token since there's no
+                            // way this could be a valid multiline string start anymore
+                            result.id = Token.Id.SingleChar;
+                            // set the length to 1 since we could be at [=== for example
+                            self.index = result.start + 1;
+                            break;
+                        }
                     },
                 },
-                State.LongComment => switch (c) {
+                State.LongString,
+                State.LongComment,
+                => switch (c) {
                     ']' => {
-                        state = State.LongCommentPossibleEnd;
+                        state = if (state == State.LongComment) State.LongCommentPossibleEnd else State.LongStringPossibleEnd;
                         long_string_sep_count = 0;
                     },
                     else => {},
                 },
-                State.LongCommentPossibleEnd => switch (c) {
+                State.LongStringPossibleEnd,
+                State.LongCommentPossibleEnd,
+                => switch (c) {
                     ']' => {
                         if (long_string_sep_count == expected_long_string_sep_count) {
-                            result.start = self.index + 1;
-                            state = State.Start;
+                            if (state == State.LongCommentPossibleEnd) {
+                                result.start = self.index + 1;
+                                state = State.Start;
+                            } else {
+                                self.index += 1;
+                                result.id = Token.Id.String;
+                                break;
+                            }
                         } else {
-                            state = State.LongComment;
+                            state = if (state == State.LongCommentPossibleEnd) State.LongComment else State.LongString;
                         }
                     },
                     '=' => {
                         long_string_sep_count += 1;
                     },
                     else => {
-                        state = State.LongComment;
+                        state = if (state == State.LongCommentPossibleEnd) State.LongComment else State.LongString;
                     },
                 },
                 State.ShortComment => switch (c) {
@@ -415,9 +472,20 @@ pub const Lexer = struct {
                 => {
                     result.start = self.index;
                 },
+                State.LongStringStart,
+                => {
+                    // fall back to a single [ token since there's no
+                    // way this could be a valid multiline string start anymore
+                    result.id = Token.Id.SingleChar;
+                    // set the length to 1 since we could be at [=== for example
+                    self.index = result.start + 1;
+                },
                 State.LongCommentPossibleEnd,
                 State.LongComment,
                 => return LexError.UnfinishedLongComment,
+                State.LongStringPossibleEnd,
+                State.LongString,
+                => return LexError.UnfinishedLongString,
                 State.StringLiteral,
                 State.StringLiteralBackslash,
                 => return LexError.UnfinishedString,
@@ -463,6 +531,17 @@ test "hello 'world'" {
     });
 }
 
+test "long strings" {
+    try testLex("[[]]", &[_]Token.Id{Token.Id.String});
+    try testLex("[===[\nhello\nworld\n]===]", &[_]Token.Id{Token.Id.String});
+    try testLex("[==", &[_]Token.Id{Token.Id.SingleChar, Token.Id.EQ});
+    try testLex("[]", &[_]Token.Id{Token.Id.SingleChar, Token.Id.SingleChar});
+    // TODO: this depends on LUA_COMPAT_LSTR
+    try testLex("[[ [[ ]]", &[_]Token.Id{Token.Id.String});
+    // this is always allowed
+    try testLex("[=[ [[ ]] ]=]", &[_]Token.Id{Token.Id.String});
+}
+
 test "comments and dashes" {
     try testLex("-", &[_]Token.Id{Token.Id.SingleChar});
     try testLex("a-b", &[_]Token.Id{ Token.Id.Name, Token.Id.SingleChar, Token.Id.Name });
@@ -471,6 +550,7 @@ test "comments and dashes" {
     try testLex("--[this is a short comment\nreturn", &[_]Token.Id{Token.Id.Keyword_return});
     try testLex("--[[local hello = 'wor\\'ld']]", &[_]Token.Id{});
     try testLex("--[==[\nlocal\nhello\n=\n'world'\n]==]", &[_]Token.Id{});
+    try testLex("--[==", &[_]Token.Id{});
 }
 
 test "dots, concat, ellipsis" {
@@ -518,6 +598,12 @@ test "= and compound = operators" {
     });
 }
 
+test "LexError.InvalidLongStringDelimiter" {
+    // see comment in Lexer.next near the return of LexError.InvalidLongStringDelimiter
+    const simple = testLex("[==]", &[_]Token.Id{Token.Id.String});
+    std.testing.expectError(LexError.InvalidLongStringDelimiter, simple);
+}
+
 test "LexError.UnfinishedLongComment" {
     const simple = testLex("--[[", &[_]Token.Id{});
     std.testing.expectError(LexError.UnfinishedLongComment, simple);
@@ -533,8 +619,7 @@ test "LexError.UnfinishedString" {
         Token.Id.SingleChar,
         Token.Id.String,
     });
-    if (veryVerboseLexing) std.debug.warn("\n", .{});
-    std.testing.expectError(LexError.UnfinishedString, missingQuoteResult);
+    expectLexError(LexError.UnfinishedString, missingQuoteResult);
 
     const newlineResult = testLex("local hello = \"wor\\\"ld\n\"", &[_]Token.Id{
         Token.Id.Keyword_local,
@@ -542,13 +627,18 @@ test "LexError.UnfinishedString" {
         Token.Id.SingleChar,
         Token.Id.String,
     });
+    expectLexError(LexError.UnfinishedString, newlineResult);
+}
+
+fn expectLexError(expected: LexError, actual: var) void {
     if (veryVerboseLexing) std.debug.warn("\n", .{});
-    std.testing.expectError(LexError.UnfinishedString, newlineResult);
+    std.testing.expectError(expected, actual);
+    if (dumpTokensDuringTests) std.debug.warn("{}\n", .{actual});
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
     var lexer = Lexer.init(source);
-    if (dumpTokensDuringTests and expected_tokens.len > 0) std.debug.warn("\n", .{});
+    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{source});
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);

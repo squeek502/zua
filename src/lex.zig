@@ -15,6 +15,11 @@ const std = @import("std");
 // does no allocation or parsing of strings/numbers (that will be done later).
 // TODO: is this too big of a deviation?
 //
+// Related to the previous paragraph, Zig's tokenizer cannot fail. Lua's lexer can fail
+// at multiple points (both when parsing strings/numbers and on general syntax errors).
+// TODO: decide if not failing could/should be a property of this implementation;
+//       if it can fail then maybe avoiding allocating doesn't make as much sense?
+//
 // Lua's lexer skips over all comments (doesn't store them as tokens). This functionality is
 // kept in this implementation.
 

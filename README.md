@@ -11,7 +11,13 @@ Goals, in order of priority:
 ## Status
 
 - [ ] Lexer (llex.c/.h) -> [lex.zig](src/lex.zig)
-  + Can currently tokenize `local hello = "world"`
+  + [x] Keywords
+  + [x] Identifiers
+  + [x] `..`, `...`
+  + [x] `==`, `>=`, `<=`, `~=`
+  + [x] String literals (single/double quoted and multi-line (`[[`))
+  + [x] Comments (`--` and `--[[`)
+  + [ ] Numbers
 - [ ] Parser (lparser.c/.h)
 - [ ] ...
 

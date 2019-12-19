@@ -17,7 +17,8 @@ Goals, in order of priority:
   + [x] `==`, `>=`, `<=`, `~=`
   + [x] String literals (single/double quoted and multi-line (`[[`))
   + [x] Comments (`--` and `--[[`)
-  + [ ] Numbers
+  + [x] Numbers
+  + [ ] Improve tests, perhaps use fuzz testing
 - [ ] Parser (lparser.c/.h)
 - [ ] ...
 

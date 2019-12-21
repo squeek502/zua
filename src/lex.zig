@@ -227,6 +227,7 @@ pub const Lexer = struct {
         Identifier,
         StringLiteral,
         StringLiteralBackslash,
+        StringLiteralBackslashLineEndings,
         Dash,
         Dot,
         Concat,
@@ -267,6 +268,7 @@ pub const Lexer = struct {
         var expected_string_level: usize = 0;
         var string_escape_n: std.math.IntFittingRange(0, 999) = 0;
         var string_escape_i: std.math.IntFittingRange(0, 3) = 0;
+        var string_escape_line_ending: u8 = undefined;
         var number_is_float: bool = false;
         var number_starting_char: u8 = undefined;
         var number_exponent_signed_char: ?u8 = null;
@@ -359,6 +361,13 @@ pub const Lexer = struct {
                             state = State.StringLiteral;
                         }
                     },
+                    '\r', '\n' => {
+                        if (string_escape_i > 0) {
+                            return LexError.UnfinishedString;
+                        }
+                        state = State.StringLiteralBackslashLineEndings;
+                        string_escape_line_ending = c;
+                    },
                     else => {
                         // if the escape sequence had any digits, then
                         // we need to backtrack so as not to escape the current
@@ -366,6 +375,21 @@ pub const Lexer = struct {
                         if (string_escape_i > 0) {
                             self.index -= 1;
                         }
+                        state = State.StringLiteral;
+                    },
+                },
+                State.StringLiteralBackslashLineEndings => switch(c) {
+                    '\r', '\n' => {
+                        // can only escape \r\n or \n\r pairs, not \r\r or \n\n
+                        if (c == string_escape_line_ending) {
+                            return LexError.UnfinishedString;
+                        } else {
+                            state = State.StringLiteral;
+                        }
+                    },
+                    else => {
+                        // backtrack so that we don't escape the current char
+                        self.index -= 1;
                         state = State.StringLiteral;
                     },
                 },
@@ -663,6 +687,7 @@ pub const Lexer = struct {
                 => return LexError.UnfinishedLongString,
                 State.StringLiteral,
                 State.StringLiteralBackslash,
+                State.StringLiteralBackslashLineEndings,
                 => return LexError.UnfinishedString,
                 State.NumberHexStart,
                 State.NumberExponentStart,
@@ -730,6 +755,9 @@ test "strings" {
     // carriage returns and newlines can be escaped with \
     try testLex("'\\\n\\\r'", &[_]Token.Id{Token.Id.String});
     try testLex("\".\\\x0d\\\\\\\".\\\x0d\xa5[\\ArA\"", &[_]Token.Id{Token.Id.String});
+    // a pair of CR/LF can be escaped with a single \ (either CRLF or LFCR)
+    try testLex("'\\\r\n'", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\\n\r'", &[_]Token.Id{Token.Id.String});
 }
 
 test "long strings" {

@@ -534,6 +534,7 @@ pub const Lexer = struct {
                     'a'...'d', 'A'...'D', 'f'...'w', 'F'...'W', 'y'...'z', 'Y'...'Z' => {
                         return LexError.MalformedNumber;
                     },
+                    '_' => return LexError.MalformedNumber,
                     else => {
                         if (LUA_51_COMPAT_CHECK_NEXT_BUG and c == '\x00') {
                             state = State.NumberExponentStart;
@@ -552,6 +553,7 @@ pub const Lexer = struct {
                     'g'...'z', 'G'...'Z' => {
                         return LexError.MalformedNumber;
                     },
+                    '_' => return LexError.MalformedNumber,
                     else => {
                         result.id = Token.Id.Number;
                         break;
@@ -565,6 +567,7 @@ pub const Lexer = struct {
                         }
                         number_exponent_signed_char = c;
                     },
+                    '_' => return LexError.MalformedNumber,
                     else => {
                         if (LUA_51_COMPAT_CHECK_NEXT_BUG) {
                             if (c == '\x00' and number_is_null_terminated) {
@@ -588,6 +591,7 @@ pub const Lexer = struct {
                             return LexError.MalformedNumber;
                         }
                     },
+                    '_' => return LexError.MalformedNumber,
                     else => {
                         result.id = Token.Id.Number;
                         break;
@@ -838,11 +842,16 @@ test "LexError.MalformedNumber" {
     expectLexError(LexError.MalformedNumber, testLex("0.1e--2", &[_]Token.Id{Token.Id.Number}));
     expectLexError(LexError.MalformedNumber, testLex("0.1e-)2", &[_]Token.Id{Token.Id.Number}));
     expectLexError(LexError.MalformedNumber, testLex("0.1e+-2", &[_]Token.Id{Token.Id.Number}));
-    // TODO: Lua's lexer weirdly 'allows'/consumes _ when lexing numbers (see llex.c:201 in 5.1.5),
-    //       but as far as I can tell there are no valid ways to define a number with a _ in it.
-    //       Either way, we should fail with MalformedNumber in the same ways that Lua does,
-    //       so we need to handle _ similarly to the Lua lexer.
-    //expectLexError(LexError.MalformedNumber, testLex("1_2", &[_]Token.Id{Token.Id.Number}));
+    // Lua's lexer weirdly 'allows'/consumes _ when lexing numbers (see llex.c:201 in 5.1.5),
+    // but as far as I can tell there are no valid ways to define a number with a _ in it.
+    // Either way, we should fail with MalformedNumber in the same ways that Lua does,
+    // so we need to handle _ similarly to the Lua lexer.
+    expectLexError(LexError.MalformedNumber, testLex("1_2", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLex("0x2__", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLex("0x__", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLex("1e__", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLex("1e-1_", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLex(".1_", &[_]Token.Id{Token.Id.Number}));
 }
 
 test "LexError.InvalidLongStringDelimiter" {

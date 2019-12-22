@@ -594,12 +594,18 @@ pub const Lexer = struct {
                     '_' => return LexError.MalformedNumber,
                     else => {
                         if (LUA_51_COMPAT_CHECK_NEXT_BUG) {
-                            if (c == '\x00' and number_is_null_terminated) {
-                                number_exponent_signed_char = c;
-                                state = State.NumberExponent;
-                            } else if (number_is_null_terminated) {
-                                result.id = Token.Id.Number;
-                                break;
+                            if (number_is_null_terminated) {
+                                switch (c) {
+                                    // since the number is null-terminated already,
+                                    // absolutely any consumable char is fine
+                                    '\x00', 'a'...'z', 'A'...'Z', '_' => {
+                                        state = State.NumberExponent;
+                                    },
+                                    else => {
+                                        result.id = Token.Id.Number;
+                                        break;
+                                    },
+                                }
                             } else {
                                 return LexError.MalformedNumber;
                             }
@@ -936,6 +942,13 @@ test "5.1 check_next bug compat" {
     try testLex("1\x00\x00anythingcangoherenow", &[_]Token.Id{Token.Id.Number});
     try testLex(".0\x00", &[_]Token.Id{Token.Id.Number});
     try testLex(".0\x00)", &[_]Token.Id{ Token.Id.Number, Token.Id.SingleChar });
+    // should lex as: 5\x00z5 ; \x00 ; 9\x00\x00 ; \x00
+    try testLex("5\x00z5\x009\x00\x00\x00", &[_]Token.Id{ 
+        Token.Id.Number,
+        Token.Id.SingleChar,
+        Token.Id.Number,
+        Token.Id.SingleChar,
+    });
     expectLexError(LexError.MalformedNumber, testLex("1e\x005", &[_]Token.Id{Token.Id.Number}));
 }
 

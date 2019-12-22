@@ -378,7 +378,7 @@ pub const Lexer = struct {
                         state = State.StringLiteral;
                     },
                 },
-                State.StringLiteralBackslashLineEndings => switch(c) {
+                State.StringLiteralBackslashLineEndings => switch (c) {
                     '\r', '\n' => {
                         // can only escape \r\n or \n\r pairs, not \r\r or \n\n
                         if (c == string_escape_line_ending) {
@@ -583,49 +583,55 @@ pub const Lexer = struct {
                         break;
                     },
                 },
-                State.NumberExponentStart => switch (c) {
-                    '0'...'9' => state = State.NumberExponent,
-                    '-', '+' => {
-                        if (number_exponent_signed_char) |_| {
-                            return LexError.MalformedNumber;
+                State.NumberExponentStart => {
+                    const should_consume_anything = LUA_51_COMPAT_CHECK_NEXT_BUG and number_is_null_terminated;
+                    if (should_consume_anything) {
+                        switch (c) {
+                            '\x00', '-', '+', '0'...'9', 'a'...'z', 'A'...'Z', '_' => {
+                                state = State.NumberExponent;
+                            },
+                            else => {
+                                result.id = Token.Id.Number;
+                                break;
+                            },
                         }
-                        number_exponent_signed_char = c;
-                    },
-                    '_' => return LexError.MalformedNumber,
-                    else => {
-                        if (LUA_51_COMPAT_CHECK_NEXT_BUG) {
-                            if (number_is_null_terminated) {
-                                switch (c) {
-                                    // since the number is null-terminated already,
-                                    // absolutely any consumable char is fine
-                                    '\x00', 'a'...'z', 'A'...'Z', '_' => {
-                                        state = State.NumberExponent;
-                                    },
-                                    else => {
-                                        result.id = Token.Id.Number;
-                                        break;
-                                    },
+                    } else {
+                        switch (c) {
+                            '0'...'9' => state = State.NumberExponent,
+                            '-', '+' => {
+                                if (number_exponent_signed_char) |_| {
+                                    return LexError.MalformedNumber;
                                 }
-                            } else {
+                                number_exponent_signed_char = c;
+                            },
+                            else => {
+                                // if we get here, then the token has to be either 1e, 1e-, or 1e+ which
+                                // is always malformed
                                 return LexError.MalformedNumber;
-                            }
-                        } else {
-                            return LexError.MalformedNumber;
+                            },
                         }
-                    },
+                    }
                 },
-                State.NumberExponent => switch (c) {
-                    '0'...'9' => {},
-                    'a'...'z', 'A'...'Z' => {
-                        if (LUA_51_COMPAT_CHECK_NEXT_BUG and number_is_null_terminated) {} else {
-                            return LexError.MalformedNumber;
+                State.NumberExponent => {
+                    const should_consume_anything = LUA_51_COMPAT_CHECK_NEXT_BUG and number_is_null_terminated;
+                    if (should_consume_anything) {
+                        switch (c) {
+                            '0'...'9', 'a'...'z', 'A'...'Z', '_' => {},
+                            else => {
+                                result.id = Token.Id.Number;
+                                break;
+                            },
                         }
-                    },
-                    '_' => return LexError.MalformedNumber,
-                    else => {
-                        result.id = Token.Id.Number;
-                        break;
-                    },
+                    } else {
+                        switch (c) {
+                            '0'...'9' => {},
+                            'a'...'z', 'A'...'Z', '_' => return LexError.MalformedNumber,
+                            else => {
+                                result.id = Token.Id.Number;
+                                break;
+                            },
+                        }
+                    }
                 },
                 State.CompoundEqual => switch (c) {
                     '=' => {
@@ -786,14 +792,14 @@ test "comments and dashes" {
     try testLex("--[[local hello = 'wor\\'ld']]", &[_]Token.Id{});
     try testLex("--[==[\nlocal\nhello\n=\n'world'\n]==]", &[_]Token.Id{});
     try testLex("--[==", &[_]Token.Id{});
-    try testLex("--[\n]]", &[_]Token.Id{Token.Id.SingleChar, Token.Id.SingleChar});
+    try testLex("--[\n]]", &[_]Token.Id{ Token.Id.SingleChar, Token.Id.SingleChar });
 }
 
 test "whitespace" {
     // form feed
-    try testLex("_\x0c_W_", &[_]Token.Id{Token.Id.Name, Token.Id.Name});
+    try testLex("_\x0c_W_", &[_]Token.Id{ Token.Id.Name, Token.Id.Name });
     // vertical tab
-    try testLex("_\x0b_W_", &[_]Token.Id{Token.Id.Name, Token.Id.Name});
+    try testLex("_\x0b_W_", &[_]Token.Id{ Token.Id.Name, Token.Id.Name });
 }
 
 test "dots, concat, ellipsis" {
@@ -896,7 +902,7 @@ test "LexError.InvalidLongStringDelimiter" {
     const number = testLex("[=======4", &[_]Token.Id{Token.Id.String});
     expectLexError(LexError.InvalidLongStringDelimiter, number);
 
-    const eof = testLex("[==", &[_]Token.Id{ Token.Id.String });
+    const eof = testLex("[==", &[_]Token.Id{Token.Id.String});
     expectLexError(LexError.InvalidLongStringDelimiter, eof);
 }
 
@@ -943,11 +949,16 @@ test "5.1 check_next bug compat" {
     try testLex(".0\x00", &[_]Token.Id{Token.Id.Number});
     try testLex(".0\x00)", &[_]Token.Id{ Token.Id.Number, Token.Id.SingleChar });
     // should lex as: 5\x00z5 ; \x00 ; 9\x00\x00 ; \x00
-    try testLex("5\x00z5\x009\x00\x00\x00", &[_]Token.Id{ 
+    try testLex("5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
         Token.Id.Number,
         Token.Id.SingleChar,
         Token.Id.Number,
         Token.Id.SingleChar,
+    });
+    try testLex("5\x00--z5", &[_]Token.Id{
+        Token.Id.Number,
+        Token.Id.SingleChar,
+        Token.Id.Name,
     });
     expectLexError(LexError.MalformedNumber, testLex("1e\x005", &[_]Token.Id{Token.Id.Number}));
 }

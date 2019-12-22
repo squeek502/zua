@@ -2,9 +2,6 @@ const std = @import("std");
 
 // Notes:
 //
-// This implementation is currently based mostly on Zig's tokenizer, not Lua's lexer.
-// As such, how/when errors are caught/handled is not going to be 1:1.
-//
 // In Lua's lexer, all single char tokens use their own ASCII value as their ID, and
 // every other multi-character token uses ID >= 257 (see FIRST_RESERVED in llex.h).
 // For now, this implementation uses a 'SingleChar' token as a catch-all for
@@ -12,13 +9,9 @@ const std = @import("std");
 //
 // Lua's lexer uses a lua_State and parses strings/numbers while lexing, allocating
 // strings and adding them to the lua_State's string table. This lexer, instead,
-// does no allocation or parsing of strings/numbers (that will be done later).
-// TODO: is this too big of a deviation?
-//
-// Related to the previous paragraph, Zig's tokenizer cannot fail. Lua's lexer can fail
-// at multiple points (both when parsing strings/numbers and on general syntax errors).
-// TODO: decide if not failing could/should be a property of this implementation;
-//       if it can fail then maybe avoiding allocating doesn't make as much sense?
+// does no allocation or parsing of strings/numbers (that will be done later). However,
+// it maintains 1:1 compatibility with when Lua's lexer errors by validating
+// strings/numbers at lex-time in the same way that Lua's lexer parses them.
 //
 // Lua's lexer skips over all comments (doesn't store them as tokens). This functionality is
 // kept in this implementation.
@@ -27,7 +20,7 @@ const std = @import("std");
 // TODO: ?
 
 // Debug/test output
-const dumpTokensDuringTests = true;
+const dumpTokensDuringLexing = true;
 const veryVerboseLexing = false;
 
 // In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
@@ -600,13 +593,16 @@ pub const Lexer = struct {
                             '0'...'9' => state = State.NumberExponent,
                             '-', '+' => {
                                 if (number_exponent_signed_char) |_| {
+                                    // this is an error because e.g. "1e--" would lex as "1e-" and "-" 
+                                    // and "1e-" is always invalid
                                     return LexError.MalformedNumber;
                                 }
                                 number_exponent_signed_char = c;
                             },
                             else => {
-                                // if we get here, then the token has to be either 1e, 1e-, or 1e+ which
-                                // is always malformed
+                                // if we get here, then the token up to this point has to be 
+                                // either 1e, 1e-, 1e+ which *must* be followed by a digit, and
+                                // we already know c is not a digit
                                 return LexError.MalformedNumber;
                             },
                         }

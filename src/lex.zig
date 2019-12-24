@@ -37,7 +37,7 @@ const veryVerboseLexing = false;
 // 1\0 gets lexed as the equiv of 1e but gets parsed into 1 (since the str2d func treats it as
 // a null-terminated string). For this reason, "1\0\0" will succesfully parse into 1
 // while "1e\0002" will fail to parse (since it will treat it as "1e").
-pub const LUA_51_COMPAT_CHECK_NEXT_BUG = false;
+pub const LUA_51_COMPAT_CHECK_NEXT_BUG = true;
 
 // TODO: implement or ignore this (options for handling nesting of [[]] in multiline strings)
 // for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
@@ -962,15 +962,15 @@ test "5.1 check_next bug compat" {
 fn expectLexError(expected: LexError, actual: var) void {
     if (veryVerboseLexing) std.debug.warn("\n", .{});
     std.testing.expectError(expected, actual);
-    if (dumpTokensDuringTests) std.debug.warn("{}\n", .{actual});
+    if (dumpTokensDuringLexing) std.debug.warn("{}\n", .{actual});
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
     var lexer = Lexer.init(source);
-    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{source});
+    if (dumpTokensDuringLexing) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{source});
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
-        if (dumpTokensDuringTests) lexer.dump(&token);
+        if (dumpTokensDuringLexing) lexer.dump(&token);
         std.testing.expectEqual(expected_token_id, token.id);
     }
     const last_token = try lexer.next();

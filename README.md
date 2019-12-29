@@ -18,7 +18,8 @@ Goals, in order of priority:
   + [x] String literals (single/double quoted and multi-line (`[[`))
   + [x] Comments (`--` and `--[[`)
   + [x] Numbers
-  + [ ] Improve tests, perhaps use fuzz testing
+  + [x] Improve tests, perhaps use fuzz testing
+  + [ ] Cleanup implementation
 - [ ] Parser (lparser.c/.h)
 - [ ] ...
 

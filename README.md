@@ -19,6 +19,7 @@ Goals, in order of priority:
   + [x] Comments (`--` and `--[[`)
   + [x] Numbers
   + [x] Improve tests, perhaps use fuzz testing
+    - See [Fuzzing As a Test Case Generator](https://www.ryanliptak.com/blog/fuzzing-as-test-case-generator/) and [squeek502/fuzzing-lua](https://github.com/squeek502/fuzzing-lua/)
   + [ ] Cleanup implementation
 - [ ] Parser (lparser.c/.h)
 - [ ] ...

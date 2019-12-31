@@ -15,6 +15,7 @@ pub fn build(b: *Builder) void {
     run_step.dependOn(&run_cmd.step);
 
     var tests = b.addTest("src/zua.zig");
+    tests.setBuildMode(mode);
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&tests.step);
 
@@ -24,6 +25,7 @@ pub fn build(b: *Builder) void {
     const fuzz_lex_outputs_dir = b.option([]const u8, "fuzz_lex_outputs_dir", "Directory with expected outputs for fuzz_lex tests") orelse fuzz_lex_outputs_dir_default;
 
     var fuzz_lex_tests = b.addTest("test/fuzz_lex.zig");
+    fuzz_lex_tests.setBuildMode(mode);
     fuzz_lex_tests.addBuildOption([]const u8, "fuzz_lex_inputs_dir", b.fmt("\"{}\"", .{fuzz_lex_inputs_dir}));
     fuzz_lex_tests.addBuildOption([]const u8, "fuzz_lex_outputs_dir", b.fmt("\"{}\"", .{fuzz_lex_outputs_dir}));
     fuzz_lex_tests.addPackagePath("zua.lex", "src/lex.zig");

@@ -56,21 +56,17 @@ pub const Token = struct {
     pub const Keyword = struct {
         name: []const u8,
         id: Id,
-        hash: u32,
 
         fn init(name: []const u8, id: Id) Keyword {
-            @setEvalBranchQuota(2000);
             return .{
                 .name = name,
                 .id = id,
-                .hash = std.hash_map.hashString(name),
             };
         }
 
         pub fn idFromName(name: []const u8) ?Id {
-            var hash = std.hash_map.hashString(name);
             for (keywords) |keyword| {
-                if (keyword.hash == hash and std.mem.eql(u8, keyword.name, name)) {
+                if (std.mem.eql(u8, keyword.name, name)) {
                     return keyword.id;
                 }
             }

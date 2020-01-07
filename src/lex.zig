@@ -20,7 +20,7 @@ const std = @import("std");
 // TODO: ?
 
 // Debug/test output
-const dumpTokensDuringLexing = true;
+const dumpTokensDuringTests = true;
 const veryVerboseLexing = false;
 
 // In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
@@ -966,15 +966,15 @@ test "5.1 check_next bug compat" {
 fn expectLexError(expected: LexError, actual: var) void {
     if (veryVerboseLexing) std.debug.warn("\n", .{});
     std.testing.expectError(expected, actual);
-    if (dumpTokensDuringLexing) std.debug.warn("{}\n", .{actual});
+    if (dumpTokensDuringTests) std.debug.warn("{}\n", .{actual});
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
     var lexer = Lexer.init(source);
-    if (dumpTokensDuringLexing) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{source});
+    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{source});
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
-        if (dumpTokensDuringLexing) lexer.dump(&token);
+        if (dumpTokensDuringTests) lexer.dump(&token);
         std.testing.expectEqual(expected_token_id, token.id);
     }
     const last_token = try lexer.next();

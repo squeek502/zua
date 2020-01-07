@@ -39,7 +39,7 @@ test "fuzz_llex input/output pairs" {
         var result_out_stream = std.io.SliceOutStream.init(result_buffer[0..]);
         const result_stream = &result_out_stream.stream;
 
-        var lexer = lex.Lexer.init(contents);
+        var lexer = lex.DefaultLexer.init(contents);
         while (true) {
             const token = lexer.next() catch |e| {
                 if (verboseTestPrinting) {

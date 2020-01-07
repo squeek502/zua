@@ -43,8 +43,6 @@ pub const LUA_51_COMPAT_CHECK_NEXT_BUG = true;
 // for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
 const LUA_COMPAT_LSTR = 0;
 
-var terribleTempString: [10]u8 = undefined;
-
 pub const Token = struct {
     id: Id,
     start: usize,
@@ -136,6 +134,17 @@ pub const Token = struct {
         Eof,
     };
 
+    // buffer for nameForDisplay
+    var token_name_buf: [10]u8 = undefined;
+
+    /// Intended to be equivalent to Lua's luaX_token2str function
+    ///
+    /// NOTE: To avoid allocation, this function uses a static buffer for the
+    ///       name of control characters (which display as `char(15)`, etc).
+    ///       This means that this function only works correctly if you immediately
+    ///       print/copy the result before calling it again, as the returned
+    ///       slice can potentially be overwritten on subsequent calls.
+    // TODO: is this ok? ^
     pub fn nameForDisplay(self: *const Token) []const u8 {
         return switch (self.id) {
             .Keyword_and,
@@ -173,12 +182,11 @@ pub const Token = struct {
             .String => "<string>",
             .Eof => "<eof>",
             .SingleChar => blk: {
-                // TODO: make all of this less horrible
                 if (std.ascii.isCntrl(self.char.?)) {
-                    var terribleTempSliceStream = std.io.SliceOutStream.init(terribleTempString[0..]);
-                    const stream = &terribleTempSliceStream.stream;
+                    var sliceOutStream = std.io.SliceOutStream.init(token_name_buf[0..]);
+                    const stream = &sliceOutStream.stream;
                     stream.print("char({d})", .{self.char.?}) catch unreachable;
-                    break :blk terribleTempSliceStream.getWritten();
+                    break :blk sliceOutStream.getWritten();
                 } else {
                     break :blk @as(*const [1]u8, &self.char.?)[0..1];
                 }

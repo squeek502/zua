@@ -6,7 +6,7 @@ const hash_map = std.hash_map;
 // Benchmarking for the Zua lexer
 // Expects @import("build_options").fuzz_lex_inputs_dir to be a path to
 // a directory containing a corpus of inputs to test. Such a corpus can
-// be obtained from https://gtihub.com/squeek502/fuzzing-lua
+// be obtained from https://github.com/squeek502/fuzzing-lua
 
 var timer: Timer = undefined;
 

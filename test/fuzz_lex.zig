@@ -1,6 +1,16 @@
 const std = @import("std");
 const lex = @import("zua.lex");
 
+// Tests for comparing the tokens of Zua's lexer with Lua's.
+// Expects @import("build_options").fuzz_lex_inputs_dir to be a path to
+// a directory containing a corpus of inputs to test and 
+// @import("build_options").fuzz_lex_outputs_dir to be a path to a
+// directory containing the tokens obtained by running the input
+// through the Lua lexer (in a specific format).
+//
+// A usable corpus/outputs pair can be obtained from
+// https://github.com/squeek502/fuzzing-lua
+
 const verboseTestPrinting = false;
 const printTokenBounds = false;
 

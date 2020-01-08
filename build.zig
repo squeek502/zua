@@ -38,4 +38,28 @@ pub fn build(b: *Builder) void {
     bench_lex_tests.addPackagePath("zua", "src/zua.zig");
     const bench_lex_test_step = b.step("bench_lex", "Bench lexer against a fuzzed corpus from fuzzing-lua");
     bench_lex_test_step.dependOn(&bench_lex_tests.step);
+
+    const fuzz_strings_inputs_dir_default = "test/strings/inputs";
+    const fuzz_strings_outputs_dir_default = "test/strings/outputs";
+    const fuzz_strings_gen_dir_default = "test/strings/generated";
+    const fuzz_strings_inputs_dir = b.option([]const u8, "fuzz_strings_inputs_dir", "Directory with input strings for string parsing tests") orelse fuzz_strings_inputs_dir_default;
+    const fuzz_strings_outputs_dir = b.option([]const u8, "fuzz_strings_outputs_dir", "Directory with output strings for string parsing tests") orelse fuzz_strings_outputs_dir_default;
+    const fuzz_strings_gen_dir = b.option([]const u8, "fuzz_strings_gen_dir", "Directory to output generated string inputs to") orelse fuzz_strings_gen_dir_default;
+
+    var fuzz_strings = b.addTest("test/fuzz_strings.zig");
+    fuzz_strings.setBuildMode(mode);
+    fuzz_strings.addBuildOption([]const u8, "fuzz_strings_inputs_dir", b.fmt("\"{}\"", .{fuzz_strings_inputs_dir}));
+    fuzz_strings.addBuildOption([]const u8, "fuzz_strings_outputs_dir", b.fmt("\"{}\"", .{fuzz_strings_outputs_dir}));
+    fuzz_strings.addPackagePath("zua", "src/zua.zig");
+    const fuzz_strings_step = b.step("fuzz_strings", "Test string parsing against a fuzzed corpus from fuzzing-lua");
+    fuzz_strings_step.dependOn(&fuzz_strings.step);
+
+    var fuzz_strings_gen = b.addExecutable("fuzz_strings_gen", "test/fuzz_strings_gen.zig");
+    fuzz_strings_gen.setBuildMode(mode);
+    fuzz_strings_gen.addBuildOption([]const u8, "fuzz_lex_inputs_dir", b.fmt("\"{}\"", .{fuzz_lex_inputs_dir}));
+    fuzz_strings_gen.addBuildOption([]const u8, "fuzz_strings_gen_dir", b.fmt("\"{}\"", .{fuzz_strings_gen_dir}));
+    fuzz_strings_gen.addPackagePath("zua", "src/zua.zig");
+
+    const fuzz_strings_gen_run_step = b.step("fuzz_strings_gen_run", "Generate string inputs from a fuzzed corpus of lexer inputs");
+    fuzz_strings_gen_run_step.dependOn(&fuzz_strings_gen.run().step);
 }

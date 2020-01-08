@@ -28,16 +28,14 @@ pub fn build(b: *Builder) void {
     fuzz_lex_tests.setBuildMode(mode);
     fuzz_lex_tests.addBuildOption([]const u8, "fuzz_lex_inputs_dir", b.fmt("\"{}\"", .{fuzz_lex_inputs_dir}));
     fuzz_lex_tests.addBuildOption([]const u8, "fuzz_lex_outputs_dir", b.fmt("\"{}\"", .{fuzz_lex_outputs_dir}));
-    // TODO: This is probably a weird way to do this
-    fuzz_lex_tests.addPackagePath("zua.lex", "src/lex.zig");
+    fuzz_lex_tests.addPackagePath("zua", "src/zua.zig");
     const fuzz_lex_test_step = b.step("fuzz_lex", "Test lexer against a fuzzed corpus from fuzzing-lua");
     fuzz_lex_test_step.dependOn(&fuzz_lex_tests.step);
 
     var bench_lex_tests = b.addTest("test/bench_lex.zig");
     bench_lex_tests.setBuildMode(.ReleaseFast);
     bench_lex_tests.addBuildOption([]const u8, "fuzz_lex_inputs_dir", b.fmt("\"{}\"", .{fuzz_lex_inputs_dir}));
-    // TODO: This is probably a weird way to do this
-    bench_lex_tests.addPackagePath("zua.lex", "src/lex.zig");
+    bench_lex_tests.addPackagePath("zua", "src/zua.zig");
     const bench_lex_test_step = b.step("bench_lex", "Bench lexer against a fuzzed corpus from fuzzing-lua");
     bench_lex_test_step.dependOn(&bench_lex_tests.step);
 }

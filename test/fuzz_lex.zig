@@ -1,5 +1,5 @@
 const std = @import("std");
-const lex = @import("zua.lex");
+const lex = @import("zua").lex;
 
 // Tests for comparing the tokens of Zua's lexer with Lua's.
 // Expects @import("build_options").fuzz_lex_inputs_dir to be a path to
@@ -14,14 +14,15 @@ const lex = @import("zua.lex");
 const verboseTestPrinting = false;
 const printTokenBounds = false;
 
+const build_options = @import("build_options");
+const inputs_dir_opt = build_options.fuzz_lex_inputs_dir;
+const outputs_dir_opt = build_options.fuzz_lex_outputs_dir;
+
 test "fuzz_llex input/output pairs" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_allocator.deinit();
     var allocator = &arena_allocator.allocator;
 
-    const build_options = @import("build_options");
-    const inputs_dir_opt = build_options.fuzz_lex_inputs_dir;
-    const outputs_dir_opt = build_options.fuzz_lex_outputs_dir;
     // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
     const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{ inputs_dir_opt });
     const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{ outputs_dir_opt });

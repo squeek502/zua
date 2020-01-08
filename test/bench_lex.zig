@@ -1,5 +1,5 @@
 const std = @import("std");
-const lex = @import("zua.lex"); // this import relies on addPackagePath in ../build.zig
+const lex = @import("zua").lex; // this import relies on addPackagePath in ../build.zig
 const Timer = std.time.Timer;
 const hash_map = std.hash_map;
 

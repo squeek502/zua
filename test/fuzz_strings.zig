@@ -1,7 +1,7 @@
 const std = @import("std");
 const zua = @import("zua");
 const lex = zua.lex;
-const parse = zua.parse;
+const parseString = zua.parse_literal.parseString;
 
 // Tests for comparing parsed strings between Zua and Lua.
 // Expects @import("build_options").fuzz_strings_inputs_dir to be a path to
@@ -59,7 +59,7 @@ test "string input/output pairs" {
             const string_source = contents[token.start..token.end];
             var buf = try allocator.alloc(u8, string_source.len);
             defer allocator.free(buf);
-            const parsed = parse.Parser.parseStringLiteral(string_source, buf);
+            const parsed = parseString(string_source, buf);
             if (verboseTestPrinting) {
                 std.debug.warn("got\n{x}\n", .{parsed});
                 std.debug.warn("expected\n{x}\n", .{expectedContents});

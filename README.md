@@ -21,9 +21,9 @@ Goals, in order of priority:
   + [x] Improve tests, perhaps use fuzz testing
     - See [Fuzzing As a Test Case Generator](https://www.ryanliptak.com/blog/fuzzing-as-test-case-generator/) and [squeek502/fuzzing-lua](https://github.com/squeek502/fuzzing-lua/)
   + [ ] Cleanup implementation
-- [x] String parsing (in Lua this was done at lex-time) -> [parse.zig](src/parse.zig)
-- [ ] Number parsing (in Lua this was done as lex-time)
-- [ ] Parser (lparser.c/.h)
+- [x] String parsing (in Lua this was done at lex-time) -> [parse_literal.zig](src/parse_literal.zig)
+- [ ] Number parsing (in Lua this was done at lex-time)
+- [ ] Parser (lparser.c/.h) -> [parse.zig](src/parse.zig)
 - [ ] ...
 
 ## Why Lua 5.1?

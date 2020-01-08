@@ -1,6 +1,4 @@
 zig-cache/
 lua/
 tmp/
-test/corpus/
-test/output/
 *.tar.gz

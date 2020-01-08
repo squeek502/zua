@@ -1,0 +1,2 @@
+<number> char(14) .. 
+[string "fuzz"]:1: malformed number near '0a'

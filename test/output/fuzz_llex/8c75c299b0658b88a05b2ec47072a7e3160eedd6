@@ -1,0 +1,2 @@
+char(19) <number> <string> <string> <string> <number> <string> * <string> <string> <string> * <string> else <string> - <name> * <string> <string> - <name> * <string> <string> - 
+[string "fuzz"]:166: unfinished long string near '<eof>'

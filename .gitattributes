@@ -1,1 +1,4 @@
 *.zig text eol=lf
+test/corpus/** -text
+test/output/** -text
+test/strings/** -text

@@ -22,7 +22,9 @@ Goals, in order of priority:
     - See [Fuzzing As a Test Case Generator](https://www.ryanliptak.com/blog/fuzzing-as-test-case-generator/) and [squeek502/fuzzing-lua](https://github.com/squeek502/fuzzing-lua/)
   + [ ] Cleanup implementation
 - [x] String parsing (in Lua this was done at lex-time) -> [parse_literal.zig](src/parse_literal.zig) (see [`4324bd0`](https://github.com/squeek502/zua/commit/5de41fdf71eaf2a0b235e5eb581072d5488a1c57) for more details)
-- [ ] Number parsing (in Lua this was done at lex-time)
+- [ ] Number parsing (in Lua this was done at lex-time) -> [parse_literal.zig](src/parse_literal.zig)
+  + [x] Basic number parsing
+  + [ ] Proper `strtod`-compatible number parsing implementation
 - [ ] Parser (lparser.c/.h) -> [parse.zig](src/parse.zig)
 - [ ] ...
 

@@ -165,3 +165,46 @@ test "parseString" {
     // escaped numerals
     std.testing.expectEqualSlices(u8, "\x01-\x02", parseString("\"\\1-\\2\"", buf));
 }
+
+// FIXME: this is not even close to 1:1 compatible with Lua's number parsing
+// since Lua's number parsing uses strtod. This should work for most
+// simple numbers, though
+// TODO: should this be able to fail?
+pub fn parseNumber(source: []const u8) f64 {
+    // TODO: use a strtod-compatible function
+    if (std.fmt.parseFloat(f64, source)) |number| {
+        return number;
+    } else |err| switch(err) {
+        error.InvalidCharacter => {},
+    }
+    if (source[0] == '0' and (source[1] == 'x' or source[1] == 'X')) {
+        if (std.fmt.parseUnsigned(u64, source[2..], 16)) |number| {
+            return @intToFloat(f64, number);
+        } else |err| switch(err) {
+            error.InvalidCharacter => unreachable,
+            error.Overflow => return std.math.inf(f64),
+        }
+    }
+    // FIXME: this is probably a bad way to handle this
+    return std.math.nan(f64);
+}
+
+test "parseNumber decimal" {
+    std.testing.expectEqual(@as(f64, 1.0), parseNumber("1"));
+    std.testing.expectEqual(@as(f64, 2000.0), parseNumber("2e3"));
+    std.testing.expectEqual(@as(f64, 1234.0), parseNumber("1.234e3"));
+}
+
+test "parseNumber hex" {
+    std.testing.expectEqual(@as(f64, 0x0), parseNumber("0x0"));
+    std.testing.expectEqual(@as(f64, 0xf), parseNumber("0xf"));
+
+    // strtod in C99 handles hex digits
+    // this would overflow with the strtoul fallback
+    //std.testing.expectEqual(@as(f64, 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff), parseNumber("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
+
+    // because Lua uses strtod internally, it actually can accept
+    // hex constants with a power exponent (denoted by p)
+    // FIXME: allow this pattern in the lexer once parseNumber can handle it
+    //std.testing.expectEqual(@as(f64, 1020), parseNumber("0xffp2"));
+}

@@ -47,8 +47,8 @@ test "fuzz_llex input/output pairs" {
         const expectedContents = try std.io.readFileAlloc(allocator, path_buffer.toSliceConst());
         defer allocator.free(expectedContents);
 
-        var result_out_stream = std.io.SliceOutStream.init(result_buffer[0..]);
-        const result_stream = &result_out_stream.stream;
+        var result_out_stream = std.io.fixedBufferStream(&result_buffer);
+        const result_stream = result_out_stream.outStream();
 
         var lexer = lex.DefaultLexer.init(contents);
         while (true) {

@@ -166,10 +166,7 @@ pub const Token = struct {
             .Eof => "<eof>",
             .SingleChar => blk: {
                 if (std.ascii.isCntrl(self.char.?)) {
-                    var fixedBufferStream = std.io.fixedBufferStream(&token_name_buf);
-                    const stream = fixedBufferStream.outStream();
-                    stream.print("char({d})", .{self.char.?}) catch unreachable;
-                    break :blk fixedBufferStream.getWritten();
+                    break :blk std.fmt.bufPrint(&token_name_buf, "char({d})", .{self.char.?}) catch unreachable;
                 } else {
                     break :blk std.mem.span(@as(*const [1]u8, &self.char.?));
                 }

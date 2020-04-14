@@ -23,15 +23,15 @@ pub fn main() !void {
     const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
 
     // clean the outputs dir
-    std.fs.deleteTree(outputs_dir) catch |err| switch(err) {
-        error.FileNotFound => {},
+    std.fs.cwd().deleteTree(outputs_dir) catch |err| switch(err) {
+        error.NotDir => {},
         else => |e| return e,
     };
-    try std.fs.makePath(allocator, outputs_dir);
+    try std.fs.cwd().makePath(outputs_dir);
 
     var walker = try std.fs.walkPath(allocator, inputs_dir);
     defer walker.deinit();
-    var path_buffer = try std.Buffer.init(allocator, outputs_dir);
+    var path_buffer = try std.ArrayListSentineled(u8, 0).init(allocator, outputs_dir);
     defer path_buffer.deinit();
     var result_buffer: [1024 * 1024]u8 = undefined;
 
@@ -49,11 +49,11 @@ pub fn main() !void {
             if (token.id != lex.Token.Id.String) continue;
 
             path_buffer.shrink(outputs_dir.len);
-            try path_buffer.appendByte(std.fs.path.sep);
-            var buffer_out_stream = std.io.BufferOutStream.init(&path_buffer);
-            try buffer_out_stream.stream.print("{}", .{n});
+            try path_buffer.append(std.fs.path.sep);
+            var buffer_out_stream = path_buffer.outStream();
+            try buffer_out_stream.print("{}", .{n});
 
-            try std.io.writeFile(path_buffer.toSliceConst(), contents[token.start..token.end]);
+            try std.fs.cwd().writeFile(path_buffer.span(), contents[token.start..token.end]);
 
             n += 1;
             if (n % 100 == 0) {

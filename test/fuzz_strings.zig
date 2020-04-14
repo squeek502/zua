@@ -30,7 +30,7 @@ test "string input/output pairs" {
 
     var walker = try std.fs.walkPath(allocator, inputs_dir);
     defer walker.deinit();
-    var path_buffer = try std.Buffer.init(allocator, outputs_dir);
+    var path_buffer = try std.ArrayListSentineled(u8, 0).init(allocator, outputs_dir);
     defer path_buffer.deinit();
     var result_buffer: [1024 * 1024]u8 = undefined;
 
@@ -43,9 +43,9 @@ test "string input/output pairs" {
         defer allocator.free(contents);
 
         path_buffer.shrink(outputs_dir.len);
-        try path_buffer.appendByte(std.fs.path.sep);
-        try path_buffer.append(entry.basename);
-        const expectedContents = try std.io.readFileAlloc(allocator, path_buffer.toSliceConst());
+        try path_buffer.append(std.fs.path.sep);
+        try path_buffer.appendSlice(entry.basename);
+        const expectedContents = try std.fs.cwd().readFileAlloc(allocator, path_buffer.span(), std.math.maxInt(usize));
         defer allocator.free(expectedContents);
 
         var lexer = lex.DefaultLexer.init(contents);

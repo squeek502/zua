@@ -35,49 +35,35 @@ pub const Token = struct {
     char: ?u8,
 
     pub const Keyword = struct {
-        name: []const u8,
-        id: Id,
-
-        fn init(name: []const u8, id: Id) Keyword {
-            return .{
-                .name = name,
-                .id = id,
-            };
-        }
-
         pub fn idFromName(name: []const u8) ?Id {
-            for (keywords) |keyword| {
-                if (std.mem.eql(u8, keyword.name, name)) {
-                    return keyword.id;
-                }
-            }
-            return null;
+            return keywords.get(name);
         }
     };
 
-    pub const keywords = [_]Keyword{
-        Keyword.init("and", .Keyword_and),
-        Keyword.init("break", .Keyword_break),
-        Keyword.init("do", .Keyword_do),
-        Keyword.init("else", .Keyword_else),
-        Keyword.init("elseif", .Keyword_elseif),
-        Keyword.init("end", .Keyword_end),
-        Keyword.init("false", .Keyword_false),
-        Keyword.init("for", .Keyword_for),
-        Keyword.init("function", .Keyword_function),
-        Keyword.init("if", .Keyword_if),
-        Keyword.init("in", .Keyword_in),
-        Keyword.init("local", .Keyword_local),
-        Keyword.init("nil", .Keyword_nil),
-        Keyword.init("not", .Keyword_not),
-        Keyword.init("or", .Keyword_or),
-        Keyword.init("repeat", .Keyword_repeat),
-        Keyword.init("return", .Keyword_return),
-        Keyword.init("then", .Keyword_then),
-        Keyword.init("true", .Keyword_true),
-        Keyword.init("until", .Keyword_until),
-        Keyword.init("while", .Keyword_while),
+    const keywordMapping = .{
+        .{ "and", .Keyword_and },
+        .{ "break", .Keyword_break },
+        .{ "do", .Keyword_do },
+        .{ "else", .Keyword_else },
+        .{ "elseif", .Keyword_elseif },
+        .{ "end", .Keyword_end },
+        .{ "false", .Keyword_false },
+        .{ "for", .Keyword_for },
+        .{ "function", .Keyword_function },
+        .{ "if", .Keyword_if },
+        .{ "in", .Keyword_in },
+        .{ "local", .Keyword_local },
+        .{ "nil", .Keyword_nil },
+        .{ "not", .Keyword_not },
+        .{ "or", .Keyword_or },
+        .{ "repeat", .Keyword_repeat },
+        .{ "return", .Keyword_return },
+        .{ "then", .Keyword_then },
+        .{ "true", .Keyword_true },
+        .{ "until", .Keyword_until },
+        .{ "while", .Keyword_while },
     };
+    pub const keywords = std.ComptimeStringMap(Id, keywordMapping);
 
     pub const Id = enum {
         // terminal symbols denoted by reserved words
@@ -117,6 +103,18 @@ pub const Token = struct {
         Eof,
     };
 
+    // A mapping of id -> name pairs as an array
+    const keywordNames = comptime blk: {
+        // FIXME: This relies on the keyword enums starting at 0 and being contiguous
+        var array: [keywordMapping.len][]const u8 = undefined;
+        for (keywordMapping) |mapping| {
+            const name = mapping[0];
+            const id = @enumToInt(@as(Id, mapping[1]));
+            array[id] = name;
+        }
+        break :blk array;
+    };
+
     // buffer for nameForDisplay
     var token_name_buf: [10]u8 = undefined;
 
@@ -127,7 +125,7 @@ pub const Token = struct {
     ///       This means that this function only works correctly if you immediately
     ///       print/copy the result before calling it again, as the returned
     ///       slice can potentially be overwritten on subsequent calls.
-    // TODO: is this ok? ^
+    /// TODO: is this ok? ^
     pub fn nameForDisplay(self: *const Token) []const u8 {
         return switch (self.id) {
             .Keyword_and,
@@ -151,9 +149,7 @@ pub const Token = struct {
             .Keyword_true,
             .Keyword_until,
             .Keyword_while,
-            // FIXME: This relies on the keywords array and Id enum to be in the exact same
-            // order which isnt ideal
-            => keywords[@enumToInt(self.id)].name,
+            => keywordNames[@enumToInt(self.id)],
             .Concat => "..",
             .Ellipsis => "...",
             .EQ => "==",
@@ -602,14 +598,14 @@ pub fn Lexer(comptime options: LexerOptions) type {
                                 '0'...'9' => state = State.NumberExponent,
                                 '-', '+' => {
                                     if (number_exponent_signed_char) |_| {
-                                        // this is an error because e.g. "1e--" would lex as "1e-" and "-" 
+                                        // this is an error because e.g. "1e--" would lex as "1e-" and "-"
                                         // and "1e-" is always invalid
                                         return LexError.MalformedNumber;
                                     }
                                     number_exponent_signed_char = c;
                                 },
                                 else => {
-                                    // if we get here, then the token up to this point has to be 
+                                    // if we get here, then the token up to this point has to be
                                     // either 1e, 1e-, 1e+ which *must* be followed by a digit, and
                                     // we already know c is not a digit
                                     return LexError.MalformedNumber;
@@ -943,7 +939,7 @@ test "LexError.UnfinishedString" {
 }
 
 test "5.1 check_next bug compat on" {
-    const CheckNextCompatLexer = Lexer(LexerOptions{.check_next_bug_compat = true});
+    const CheckNextCompatLexer = Lexer(LexerOptions{ .check_next_bug_compat = true });
 
     try testLexType(CheckNextCompatLexer, ".\x00", &[_]Token.Id{Token.Id.Concat});
     try testLexType(CheckNextCompatLexer, ".\x00\x00", &[_]Token.Id{Token.Id.Ellipsis});
@@ -970,11 +966,11 @@ test "5.1 check_next bug compat on" {
 }
 
 test "5.1 check_next bug compat off" {
-    const NoCheckNextCompatLexer = Lexer(LexerOptions{.check_next_bug_compat = false});
+    const NoCheckNextCompatLexer = Lexer(LexerOptions{ .check_next_bug_compat = false });
 
-    try testLexType(NoCheckNextCompatLexer, ".\x00", &[_]Token.Id{Token.Id.SingleChar, Token.Id.SingleChar});
-    try testLexType(NoCheckNextCompatLexer, "1\x00", &[_]Token.Id{Token.Id.Number, Token.Id.SingleChar});
-    try testLexType(NoCheckNextCompatLexer, "1\x00-5", &[_]Token.Id{Token.Id.Number, Token.Id.SingleChar, Token.Id.SingleChar, Token.Id.Number});
+    try testLexType(NoCheckNextCompatLexer, ".\x00", &[_]Token.Id{ Token.Id.SingleChar, Token.Id.SingleChar });
+    try testLexType(NoCheckNextCompatLexer, "1\x00", &[_]Token.Id{ Token.Id.Number, Token.Id.SingleChar });
+    try testLexType(NoCheckNextCompatLexer, "1\x00-5", &[_]Token.Id{ Token.Id.Number, Token.Id.SingleChar, Token.Id.SingleChar, Token.Id.Number });
     // should lex as: 5 ; \x00 ; z5 ; \x00 ; 9 ; \x00 ; \x00 ; \x00
     try testLexType(NoCheckNextCompatLexer, "5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
         Token.Id.Number,

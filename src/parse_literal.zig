@@ -172,6 +172,9 @@ test "parseString" {
 // TODO: should this be able to fail?
 pub fn parseNumber(source: []const u8) f64 {
     // TODO: use a strtod-compatible function
+    // Related Zig issues:
+    //   https://github.com/ziglang/zig/issues/2207
+    //   https://github.com/ziglang/zig/issues/2047
     if (std.fmt.parseFloat(f64, source)) |number| {
         return number;
     } else |err| switch(err) {

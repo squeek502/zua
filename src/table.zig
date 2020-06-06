@@ -96,30 +96,30 @@ pub const Table = struct {
         // TODO: This is woefully underimplemented
         fn keyHash(key: Value) u32 {
             switch (key) {
-                .Boolean => |val| {
+                .boolean => |val| {
                     const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val));
                     return autoHashFn(val);
                 },
-                .Number => |val| {
+                .number => |val| {
                     const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val));
                     return autoHashFn(val);
                 },
-                .String, .Table, .Function, .Userdata, .Thread => |val| {
+                .string, .table, .function, .userdata, .thread => |val| {
                     // TODO
                     //const ptrHashFn = std.hash_map.getHashPtrAddrFn(*object.GCObject);
                     //return ptrHashFn(val);
                     return 0;
                 },
-                .LightUserdata => |val| {
+                .light_userdata => |val| {
                     const ptrHashFn = std.hash_map.getHashPtrAddrFn(@TypeOf(val));
                     return ptrHashFn(val);
                 },
-                .Nil => {
+                .nil => {
                     // TODO: nil key will lead to a 'table index is nil' error
                     // so might be able to short-circuit here instead
                     return 0;
                 },
-                .None => unreachable,
+                .none => unreachable,
             }
         }
 
@@ -149,7 +149,7 @@ pub const Table = struct {
         if (narray > 0) {
             // this is kinda weird, but it more closely matches how Lua expects things
             // to work
-            try self.array.appendNTimes(Value.Nil, narray);
+            try self.array.appendNTimes(Value.nil, narray);
         }
         if (nhash > 0) {
             try self.map.ensureCapacity(nhash);
@@ -165,10 +165,10 @@ pub const Table = struct {
     /// returns the index for `key' if `key' is an appropriate key to live in
     /// the array part of the table, error.InvalidType otherwise.
     pub fn arrayIndex(key: Value) !usize {
-        if (key != .Number) {
+        if (key != .number) {
             return error.InvalidArrayKey;
         }
-        const float_val = key.Number;
+        const float_val = key.number;
         const int_val = @floatToInt(usize, float_val);
         // must be positive and the float and int version of the key must be the same
         if (int_val < 0 or @intToFloat(f64, int_val) != float_val) {
@@ -199,9 +199,9 @@ pub const Table = struct {
 
     pub fn get(self: *Table, key: Value) ?*Value {
         switch (key) {
-            .Nil => return null,
-            .None => unreachable,
-            .Number => {
+            .nil => return null,
+            .none => unreachable,
+            .number => {
                 // try the array portion
                 if (arrayIndex(key)) |lua_i| {
                     if (self.arrayGet(lua_i)) |val| {
@@ -233,10 +233,10 @@ pub const Table = struct {
         if (self.get(key)) |val| {
             return val;
         }
-        if (key == .Nil) {
+        if (key == .nil) {
             return error.TableIndexIsNil;
         }
-        if (key == .Number and std.math.isNan(key.Number)) {
+        if (key == .number and std.math.isNan(key.number)) {
             return error.TableIndexIsNan;
         }
         //if (arrayIndex(key)) |lua_i| {
@@ -247,7 +247,7 @@ pub const Table = struct {
         //    error.InvalidArrayKey => {},
         //}
         // TODO: handle growing/shrinking the array portion
-        const kv = try self.map.getOrPutValue(key, Value.Nil);
+        const kv = try self.map.getOrPutValue(key, Value.nil);
         return &(kv.value);
     }
 
@@ -269,11 +269,11 @@ pub const Table = struct {
         // This is a direct port of the Lua implementation to maintain
         // that quirk
         var j: usize = self.array.items.len;
-        if (j > 0 and self.array.items[fromLuaIndex(j)] == .Nil) {
+        if (j > 0 and self.array.items[fromLuaIndex(j)] == .nil) {
             var i: usize = 0;
             while (j - i > 1) {
                 var m: usize = (i + j) / 2;
-                if (self.array.items[fromLuaIndex(m)] == .Nil) {
+                if (self.array.items[fromLuaIndex(m)] == .nil) {
                     j = m;
                 } else {
                     i = m;
@@ -289,8 +289,8 @@ pub const Table = struct {
         // need to check the map portion for any remaining contiguous keys now
         var last_contiguous_i: usize = j;
         j += 1;
-        while (self.map.get(Value{ .Number = @intToFloat(f64, j) })) |kv| {
-            if (kv.value == .Nil) {
+        while (self.map.get(Value{ .number = @intToFloat(f64, j) })) |kv| {
+            if (kv.value == .nil) {
                 break;
             }
             last_contiguous_i = j;
@@ -318,8 +318,8 @@ pub const Table = struct {
             //   assert(#tbl == 2)
             if (j > std.math.maxInt(i32)) {
                 var i: usize = 1;
-                linear_search: while (self.get(Value{ .Number = @intToFloat(f64, i) })) |linear_val| {
-                    if (linear_val.* == Value.Nil) {
+                linear_search: while (self.get(Value{ .number = @intToFloat(f64, i) })) |linear_val| {
+                    if (linear_val.* == Value.nil) {
                         break :linear_search;
                     }
                     i += 1;
@@ -329,8 +329,8 @@ pub const Table = struct {
         }
         while (j - last_contiguous_i > 1) {
             var m: usize = (last_contiguous_i + j) / 2;
-            if (self.map.get(Value{ .Number = @intToFloat(f64, m) })) |kv| {
-                if (kv.value != .Nil) {
+            if (self.map.get(Value{ .number = @intToFloat(f64, m) })) |kv| {
+                if (kv.value != .nil) {
                     // if value is non-nil, then search values above
                     last_contiguous_i = m;
                     continue;
@@ -358,9 +358,9 @@ pub const Table = struct {
         }
         while (self.isLuaIndexInArrayBounds(next_i)) : (next_i += 1) {
             const val = self.array.items[fromLuaIndex(next_i)];
-            if (val != .Nil) {
+            if (val != .nil) {
                 return Table.KV{
-                    .key = Value{ .Number = @intToFloat(f64, next_i) },
+                    .key = Value{ .number = @intToFloat(f64, next_i) },
                     .value = val,
                 };
             }
@@ -388,11 +388,11 @@ pub const Table = struct {
 };
 
 test "arrayIndex" {
-    const nil = Value.Nil;
+    const nil = Value.nil;
     var dummyObj = object.GCObject{};
-    const str = Value{ .String = &dummyObj };
-    const valid_num = Value{ .Number = 10 };
-    const invalid_num = Value{ .Number = 5.5 };
+    const str = Value{ .string = &dummyObj };
+    const valid_num = Value{ .number = 10 };
+    const invalid_num = Value{ .number = 5.5 };
 
     std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(nil));
     std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(str));
@@ -417,11 +417,11 @@ test "get" {
 
     // because we pre-allocated the array portion, this will give us nil
     // instead of null
-    std.testing.expectEqual(Value.Nil, tbl.get(Value{ .Number = 1 }).?.*);
+    std.testing.expectEqual(Value.nil, tbl.get(Value{ .number = 1 }).?.*);
 
     // hash map preallocation will still give us null though
     var dummyObj = object.GCObject{};
-    std.testing.expect(null == tbl.get(Value{ .String = &dummyObj }));
+    std.testing.expect(null == tbl.get(Value{ .string = &dummyObj }));
 }
 
 test "getn" {
@@ -429,15 +429,15 @@ test "getn" {
     defer tbl.deinit();
 
     std.testing.expectEqual(@as(usize, 0), tbl.getn());
-    const key = Value{ .Number = 1 };
+    const key = Value{ .number = 1 };
 
     const val = try tbl.getOrCreate(key);
     std.testing.expectEqual(@as(usize, 0), tbl.getn());
 
-    val.* = Value{ .Number = 1 };
+    val.* = Value{ .number = 1 };
     std.testing.expectEqual(@as(usize, 1), tbl.getn());
 
-    val.* = Value.Nil;
+    val.* = Value.nil;
     std.testing.expectEqual(@as(usize, 0), tbl.getn());
 }
 
@@ -448,7 +448,7 @@ test "getn quirk 1" {
 
     var i: usize = 1;
     while (i <= 6) : (i += 1) {
-        const key = Value{ .Number = @intToFloat(f64, i) };
+        const key = Value{ .number = @intToFloat(f64, i) };
         const val = tbl.get(key).?;
         val.* = key;
     }
@@ -456,14 +456,14 @@ test "getn quirk 1" {
     std.testing.expectEqual(@as(usize, 6), tbl.getn());
 
     //   tbl[3] = nil
-    const val3 = tbl.get(Value{ .Number = 3 }).?;
-    val3.* = Value.Nil;
+    const val3 = tbl.get(Value{ .number = 3 }).?;
+    val3.* = Value.nil;
     //   assert(#tbl == 6)
     std.testing.expectEqual(@as(usize, 6), tbl.getn());
 
     //   tbl[6] = nil
-    const val6 = tbl.get(Value{ .Number = 6 }).?;
-    val6.* = Value.Nil;
+    const val6 = tbl.get(Value{ .number = 6 }).?;
+    val6.* = Value.nil;
     //   assert(#tbl == 2)
     std.testing.expectEqual(@as(usize, 2), tbl.getn());
 }
@@ -478,22 +478,22 @@ test "getn quirk 2" {
 
     var i: usize = 1;
     while (i <= 5) : (i += 1) {
-        const key = Value{ .Number = @intToFloat(f64, i) };
+        const key = Value{ .number = @intToFloat(f64, i) };
         const val = try tbl.getOrCreate(key);
-        val.* = if (i != 3) key else Value.Nil;
+        val.* = if (i != 3) key else Value.nil;
     }
     //   assert(#tbl == 5)
     std.testing.expectEqual(@as(usize, 5), tbl.getn());
 
     //   tbl[10] = 10
-    const val10 = try tbl.getOrCreate(Value{ .Number = 10 });
-    val10.* = Value{ .Number = 10 };
+    const val10 = try tbl.getOrCreate(Value{ .number = 10 });
+    val10.* = Value{ .number = 10 };
     //   assert(#tbl == 10)
     std.testing.expectEqual(@as(usize, 10), tbl.getn());
 
     //   tbl[20] = 20
-    const val20 = try tbl.getOrCreate(Value{ .Number = 20 });
-    val20.* = Value{ .Number = 20 };
+    const val20 = try tbl.getOrCreate(Value{ .number = 20 });
+    val20.* = Value{ .number = 20 };
     //   assert(#tbl == 20)
     std.testing.expectEqual(@as(usize, 20), tbl.getn());
 
@@ -504,8 +504,8 @@ test "getn quirk 2" {
     //   end
     i = 40;
     while (i < std.math.maxInt(i32)) : (i *= 2) {
-        const val = try tbl.getOrCreate(Value{ .Number = @intToFloat(f64, i) });
-        val.* = Value{ .Number = @intToFloat(f64, i) };
+        const val = try tbl.getOrCreate(Value{ .number = @intToFloat(f64, i) });
+        val.* = Value{ .number = @intToFloat(f64, i) };
     }
     //   assert(#tbl == 2)
     std.testing.expectEqual(@as(usize, 2), tbl.getn());
@@ -517,22 +517,22 @@ test "getn quirk 2, next iterator" {
 
     var i: usize = 1;
     while (i <= 5) : (i += 1) {
-        const key = Value{ .Number = @intToFloat(f64, i) };
+        const key = Value{ .number = @intToFloat(f64, i) };
         const val = try tbl.getOrCreate(key);
-        val.* = if (i != 3) key else Value.Nil;
+        val.* = if (i != 3) key else Value.nil;
     }
     // 1-5 except 3
     var expected_iterations: usize = 4;
 
     i = 10;
     while (i < std.math.maxInt(i32)) : (i *= 2) {
-        const val = try tbl.getOrCreate(Value{ .Number = @intToFloat(f64, i) });
-        val.* = Value{ .Number = @intToFloat(f64, i) };
+        const val = try tbl.getOrCreate(Value{ .number = @intToFloat(f64, i) });
+        val.* = Value{ .number = @intToFloat(f64, i) };
         expected_iterations += 1;
     }
 
     var iterations: usize = 0;
-    var kv = Table.KV{ .key = Value.Nil, .value = Value.Nil };
+    var kv = Table.KV{ .key = Value.nil, .value = Value.nil };
     while (tbl.next(kv.key)) |next_kv| {
         iterations += 1;
         kv = next_kv;

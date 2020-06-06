@@ -5,7 +5,7 @@ const parseString = zua.parse_literal.parseString;
 
 // Tests for comparing parsed strings between Zua and Lua.
 // Expects @import("build_options").fuzz_strings_inputs_dir to be a path to
-// a directory containing a corpus of inputs to test and 
+// a directory containing a corpus of inputs to test and
 // @import("build_options").fuzz_strings_outputs_dir to be a path to a
 // directory containing the corresponding expected string after
 // parsing.
@@ -25,8 +25,8 @@ test "string input/output pairs" {
     var allocator = &arena_allocator.allocator;
 
     // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{ inputs_dir_opt });
-    const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{ outputs_dir_opt });
+    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
 
     var walker = try std.fs.walkPath(allocator, inputs_dir);
     defer walker.deinit();
@@ -53,8 +53,8 @@ test "string input/output pairs" {
             const token = lexer.next() catch |e| {
                 break;
             };
-            if (token.id == lex.Token.Id.Eof) break;
-            if (token.id != lex.Token.Id.String) continue;
+            if (token.id == lex.Token.Id.eof) break;
+            if (token.id != lex.Token.Id.string) continue;
 
             const string_source = contents[token.start..token.end];
             var buf = try allocator.alloc(u8, string_source.len);

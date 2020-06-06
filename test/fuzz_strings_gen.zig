@@ -23,7 +23,7 @@ pub fn main() !void {
     const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
 
     // clean the outputs dir
-    std.fs.cwd().deleteTree(outputs_dir) catch |err| switch(err) {
+    std.fs.cwd().deleteTree(outputs_dir) catch |err| switch (err) {
         error.NotDir => {},
         else => |e| return e,
     };
@@ -45,8 +45,8 @@ pub fn main() !void {
             const token = lexer.next() catch |e| {
                 break;
             };
-            if (token.id == lex.Token.Id.Eof) break;
-            if (token.id != lex.Token.Id.String) continue;
+            if (token.id == lex.Token.Id.eof) break;
+            if (token.id != lex.Token.Id.string) continue;
 
             path_buffer.shrink(outputs_dir.len);
             try path_buffer.append(std.fs.path.sep);
@@ -61,5 +61,5 @@ pub fn main() !void {
             }
         }
     }
-    std.debug.warn("{} files written to '{}'\n", .{n, outputs_dir});
+    std.debug.warn("{} files written to '{}'\n", .{ n, outputs_dir });
 }

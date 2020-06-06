@@ -3,7 +3,7 @@ const lex = @import("zua").lex;
 
 // Tests for comparing the tokens of Zua's lexer with Lua's.
 // Expects @import("build_options").fuzz_lex_inputs_dir to be a path to
-// a directory containing a corpus of inputs to test and 
+// a directory containing a corpus of inputs to test and
 // @import("build_options").fuzz_lex_outputs_dir to be a path to a
 // directory containing the tokens obtained by running the input
 // through the Lua lexer (in a specific format).
@@ -24,8 +24,8 @@ test "fuzz_llex input/output pairs" {
     var allocator = &arena_allocator.allocator;
 
     // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{ inputs_dir_opt });
-    const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{ outputs_dir_opt });
+    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
 
     var walker = try std.fs.walkPath(allocator, inputs_dir);
     defer walker.deinit();
@@ -60,13 +60,13 @@ test "fuzz_llex input/output pairs" {
             };
             if (verboseTestPrinting) {
                 if (printTokenBounds) {
-                    std.debug.warn("{}:{}:{}", .{token.start, token.nameForDisplay(), token.end});
+                    std.debug.warn("{}:{}:{}", .{ token.start, token.nameForDisplay(), token.end });
                 } else {
                     std.debug.warn("{}", .{token.nameForDisplay()});
                 }
             }
             try result_stream.print("{}", .{token.nameForDisplay()});
-            if (token.id == lex.Token.Id.Eof) {
+            if (token.id == lex.Token.Id.eof) {
                 break;
             } else {
                 if (verboseTestPrinting) {

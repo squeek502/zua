@@ -4,7 +4,7 @@ const std = @import("std");
 //
 // In Lua's lexer, all single char tokens use their own ASCII value as their ID, and
 // every other multi-character token uses ID >= 257 (see FIRST_RESERVED in llex.h).
-// For now, this implementation uses a 'SingleChar' token as a catch-all for
+// For now, this implementation uses a 'single_char' token as a catch-all for
 // such single char tokens
 //
 // Lua's lexer uses a lua_State and parses strings/numbers while lexing, allocating
@@ -41,66 +41,66 @@ pub const Token = struct {
     };
 
     const keywordMapping = .{
-        .{ "and", .Keyword_and },
-        .{ "break", .Keyword_break },
-        .{ "do", .Keyword_do },
-        .{ "else", .Keyword_else },
-        .{ "elseif", .Keyword_elseif },
-        .{ "end", .Keyword_end },
-        .{ "false", .Keyword_false },
-        .{ "for", .Keyword_for },
-        .{ "function", .Keyword_function },
-        .{ "if", .Keyword_if },
-        .{ "in", .Keyword_in },
-        .{ "local", .Keyword_local },
-        .{ "nil", .Keyword_nil },
-        .{ "not", .Keyword_not },
-        .{ "or", .Keyword_or },
-        .{ "repeat", .Keyword_repeat },
-        .{ "return", .Keyword_return },
-        .{ "then", .Keyword_then },
-        .{ "true", .Keyword_true },
-        .{ "until", .Keyword_until },
-        .{ "while", .Keyword_while },
+        .{ "and", .keyword_and },
+        .{ "break", .keyword_break },
+        .{ "do", .keyword_do },
+        .{ "else", .keyword_else },
+        .{ "elseif", .keyword_elseif },
+        .{ "end", .keyword_end },
+        .{ "false", .keyword_false },
+        .{ "for", .keyword_for },
+        .{ "function", .keyword_function },
+        .{ "if", .keyword_if },
+        .{ "in", .keyword_in },
+        .{ "local", .keyword_local },
+        .{ "nil", .keyword_nil },
+        .{ "not", .keyword_not },
+        .{ "or", .keyword_or },
+        .{ "repeat", .keyword_repeat },
+        .{ "return", .keyword_return },
+        .{ "then", .keyword_then },
+        .{ "true", .keyword_true },
+        .{ "until", .keyword_until },
+        .{ "while", .keyword_while },
     };
     pub const keywords = std.ComptimeStringMap(Id, keywordMapping);
 
     pub const Id = enum {
         // terminal symbols denoted by reserved words
-        Keyword_and,
-        Keyword_break,
-        Keyword_do,
-        Keyword_else,
-        Keyword_elseif,
-        Keyword_end,
-        Keyword_false,
-        Keyword_for,
-        Keyword_function,
-        Keyword_if,
-        Keyword_in,
-        Keyword_local,
-        Keyword_nil,
-        Keyword_not,
-        Keyword_or,
-        Keyword_repeat,
-        Keyword_return,
-        Keyword_then,
-        Keyword_true,
-        Keyword_until,
-        Keyword_while,
+        keyword_and,
+        keyword_break,
+        keyword_do,
+        keyword_else,
+        keyword_elseif,
+        keyword_end,
+        keyword_false,
+        keyword_for,
+        keyword_function,
+        keyword_if,
+        keyword_in,
+        keyword_local,
+        keyword_nil,
+        keyword_not,
+        keyword_or,
+        keyword_repeat,
+        keyword_return,
+        keyword_then,
+        keyword_true,
+        keyword_until,
+        keyword_while,
         // any normal byte
-        SingleChar,
+        single_char,
         // other terminal symbols
-        Concat,
-        Ellipsis,
-        EQ,
-        GE,
-        LE,
-        NE,
-        Number,
-        Name,
-        String,
-        Eof,
+        concat,
+        ellipsis,
+        eq,
+        ge,
+        le,
+        ne,
+        number,
+        name,
+        string,
+        eof,
     };
 
     // A mapping of id -> name pairs as an array
@@ -128,39 +128,39 @@ pub const Token = struct {
     /// TODO: is this ok? ^
     pub fn nameForDisplay(self: *const Token) []const u8 {
         return switch (self.id) {
-            .Keyword_and,
-            .Keyword_break,
-            .Keyword_do,
-            .Keyword_else,
-            .Keyword_elseif,
-            .Keyword_end,
-            .Keyword_false,
-            .Keyword_for,
-            .Keyword_function,
-            .Keyword_if,
-            .Keyword_in,
-            .Keyword_local,
-            .Keyword_nil,
-            .Keyword_not,
-            .Keyword_or,
-            .Keyword_repeat,
-            .Keyword_return,
-            .Keyword_then,
-            .Keyword_true,
-            .Keyword_until,
-            .Keyword_while,
+            .keyword_and,
+            .keyword_break,
+            .keyword_do,
+            .keyword_else,
+            .keyword_elseif,
+            .keyword_end,
+            .keyword_false,
+            .keyword_for,
+            .keyword_function,
+            .keyword_if,
+            .keyword_in,
+            .keyword_local,
+            .keyword_nil,
+            .keyword_not,
+            .keyword_or,
+            .keyword_repeat,
+            .keyword_return,
+            .keyword_then,
+            .keyword_true,
+            .keyword_until,
+            .keyword_while,
             => keywordNames[@enumToInt(self.id)],
-            .Concat => "..",
-            .Ellipsis => "...",
-            .EQ => "==",
-            .GE => ">=",
-            .LE => "<=",
-            .NE => "~=",
-            .Number => "<number>",
-            .Name => "<name>",
-            .String => "<string>",
-            .Eof => "<eof>",
-            .SingleChar => blk: {
+            .concat => "..",
+            .ellipsis => "...",
+            .eq => "==",
+            .ge => ">=",
+            .le => "<=",
+            .ne => "~=",
+            .number => "<number>",
+            .name => "<name>",
+            .string => "<string>",
+            .eof => "<eof>",
+            .single_char => blk: {
                 if (std.ascii.isCntrl(self.char.?)) {
                     break :blk std.fmt.bufPrint(&token_name_buf, "char({d})", .{self.char.?}) catch unreachable;
                 } else {
@@ -221,28 +221,28 @@ pub fn Lexer(comptime options: LexerOptions) type {
         }
 
         const State = enum {
-            Start,
-            Identifier,
-            StringLiteral,
-            StringLiteralBackslash,
-            StringLiteralBackslashLineEndings,
-            Dash,
-            Dot,
-            Concat,
-            CommentStart,
-            ShortComment,
-            LongCommentStart,
-            LongComment,
-            LongCommentPossibleEnd,
-            LongStringStart,
-            LongString,
-            LongStringPossibleEnd,
-            Number,
-            NumberExponentStart,
-            NumberExponent,
-            NumberHexStart,
-            NumberHex,
-            CompoundEqual,
+            start,
+            identifier,
+            string_literal,
+            string_literal_backslash,
+            string_literal_backslash_line_endings,
+            dash,
+            dot,
+            concat,
+            comment_start,
+            short_comment,
+            long_comment_start,
+            long_comment,
+            long_comment_possible_end,
+            long_string_start,
+            long_string,
+            long_string_possible_end,
+            number,
+            number_exponent_start,
+            number_exponent,
+            number_hex_start,
+            number_hex,
+            compound_equal,
         };
 
         pub fn next(self: *Self) LexError!Token {
@@ -255,12 +255,12 @@ pub fn Lexer(comptime options: LexerOptions) type {
                 }
             }
             var result = Token{
-                .id = Token.Id.Eof,
+                .id = Token.Id.eof,
                 .start = start_index,
                 .end = undefined,
                 .char = null,
             };
-            var state = State.Start;
+            var state = State.start;
             var string_delim: u8 = undefined;
             var string_level: usize = 0;
             var expected_string_level: usize = 0;
@@ -275,7 +275,7 @@ pub fn Lexer(comptime options: LexerOptions) type {
                 const c = self.buffer[self.index];
                 if (veryVerboseLexing) std.debug.warn(":{}", .{@tagName(state)});
                 switch (state) {
-                    State.Start => switch (c) {
+                    State.start => switch (c) {
                         '\n', '\r' => {
                             result.start = self.index + 1;
                         },
@@ -286,42 +286,42 @@ pub fn Lexer(comptime options: LexerOptions) type {
                         },
                         '-' => {
                             // this could be the start of a comment, a long comment, or a single -
-                            state = State.Dash;
+                            state = State.dash;
                         },
                         'a'...'z', 'A'...'Z', '_' => {
-                            state = State.Identifier;
-                            result.id = Token.Id.Name;
+                            state = State.identifier;
+                            result.id = Token.Id.name;
                         },
                         '0'...'9' => {
-                            state = State.Number;
+                            state = State.number;
                             number_starting_char = c;
                             if (options.check_next_bug_compat) {
                                 number_is_null_terminated = false;
                             }
                         },
                         '"', '\'' => {
-                            state = State.StringLiteral;
+                            state = State.string_literal;
                             string_delim = c;
-                            result.id = Token.Id.String;
+                            result.id = Token.Id.string;
                         },
                         '.' => {
                             // this could be the start of .., ..., or a single .
-                            state = State.Dot;
+                            state = State.dot;
                         },
                         '>', '<', '~', '=' => {
-                            state = State.CompoundEqual;
+                            state = State.compound_equal;
                         },
                         '[' => {
-                            state = State.LongStringStart;
+                            state = State.long_string_start;
                             expected_string_level = 0;
                         },
                         else => {
-                            result.id = Token.Id.SingleChar;
+                            result.id = Token.Id.single_char;
                             self.index += 1;
                             break;
                         },
                     },
-                    State.Identifier => switch (c) {
+                    State.identifier => switch (c) {
                         'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
                         else => {
                             const name = self.buffer[result.start..self.index];
@@ -331,9 +331,9 @@ pub fn Lexer(comptime options: LexerOptions) type {
                             break;
                         },
                     },
-                    State.StringLiteral => switch (c) {
+                    State.string_literal => switch (c) {
                         '\\' => {
-                            state = State.StringLiteralBackslash;
+                            state = State.string_literal_backslash;
                             string_escape_i = 0;
                             string_escape_n = 0;
                         },
@@ -346,7 +346,7 @@ pub fn Lexer(comptime options: LexerOptions) type {
                         '\n', '\r' => return LexError.UnfinishedString,
                         else => {},
                     },
-                    State.StringLiteralBackslash => switch (c) {
+                    State.string_literal_backslash => switch (c) {
                         '0'...'9' => {
                             // Validate that any \ddd escape sequences can actually fit
                             // in a byte
@@ -356,14 +356,14 @@ pub fn Lexer(comptime options: LexerOptions) type {
                                 if (string_escape_n > std.math.maxInt(u8)) {
                                     return LexError.EscapeSequenceTooLarge;
                                 }
-                                state = State.StringLiteral;
+                                state = State.string_literal;
                             }
                         },
                         '\r', '\n' => {
                             if (string_escape_i > 0) {
                                 return LexError.UnfinishedString;
                             }
-                            state = State.StringLiteralBackslashLineEndings;
+                            state = State.string_literal_backslash_line_endings;
                             string_escape_line_ending = c;
                         },
                         else => {
@@ -373,64 +373,64 @@ pub fn Lexer(comptime options: LexerOptions) type {
                             if (string_escape_i > 0) {
                                 self.index -= 1;
                             }
-                            state = State.StringLiteral;
+                            state = State.string_literal;
                         },
                     },
-                    State.StringLiteralBackslashLineEndings => switch (c) {
+                    State.string_literal_backslash_line_endings => switch (c) {
                         '\r', '\n' => {
                             // can only escape \r\n or \n\r pairs, not \r\r or \n\n
                             if (c == string_escape_line_ending) {
                                 return LexError.UnfinishedString;
                             } else {
-                                state = State.StringLiteral;
+                                state = State.string_literal;
                             }
                         },
                         else => {
                             // backtrack so that we don't escape the current char
                             self.index -= 1;
-                            state = State.StringLiteral;
+                            state = State.string_literal;
                         },
                     },
-                    State.Dash => switch (c) {
+                    State.dash => switch (c) {
                         '-' => {
-                            state = State.CommentStart;
+                            state = State.comment_start;
                         },
                         else => {
-                            result.id = Token.Id.SingleChar;
+                            result.id = Token.Id.single_char;
                             break;
                         },
                     },
-                    State.CommentStart => switch (c) {
+                    State.comment_start => switch (c) {
                         '[' => {
-                            state = State.LongCommentStart;
+                            state = State.long_comment_start;
                             expected_string_level = 0;
                         },
                         '\r', '\n' => {
                             // comment immediately ends
                             result.start = self.index + 1;
-                            state = State.Start;
+                            state = State.start;
                         },
                         else => {
-                            state = State.ShortComment;
+                            state = State.short_comment;
                         },
                     },
-                    State.LongStringStart,
-                    State.LongCommentStart,
+                    State.long_string_start,
+                    State.long_comment_start,
                     => switch (c) {
                         '=' => {
                             expected_string_level += 1;
                         },
                         '[' => {
-                            state = if (state == State.LongCommentStart) State.LongComment else State.LongString;
+                            state = if (state == State.long_comment_start) State.long_comment else State.long_string;
                         },
                         else => {
-                            if (state == State.LongCommentStart) {
+                            if (state == State.long_comment_start) {
                                 if (c == '\n' or c == '\r') {
                                     // not a long comment, but the short comment ends immediately
                                     result.start = self.index + 1;
-                                    state = State.Start;
+                                    state = State.start;
                                 } else {
-                                    state = State.ShortComment;
+                                    state = State.short_comment;
                                 }
                             } else {
                                 // Lua makes the pattern [=X where X is anything but [ or = an explicit
@@ -446,58 +446,58 @@ pub fn Lexer(comptime options: LexerOptions) type {
                                 if (expected_string_level > 0) {
                                     return LexError.InvalidLongStringDelimiter;
                                 } else {
-                                    result.id = Token.Id.SingleChar;
+                                    result.id = Token.Id.single_char;
                                     break;
                                 }
                             }
                         },
                     },
-                    State.LongString,
-                    State.LongComment,
+                    State.long_string,
+                    State.long_comment,
                     => switch (c) {
                         ']' => {
-                            state = if (state == State.LongComment) State.LongCommentPossibleEnd else State.LongStringPossibleEnd;
+                            state = if (state == State.long_comment) State.long_comment_possible_end else State.long_string_possible_end;
                             string_level = 0;
                         },
                         else => {},
                     },
-                    State.LongStringPossibleEnd,
-                    State.LongCommentPossibleEnd,
+                    State.long_string_possible_end,
+                    State.long_comment_possible_end,
                     => switch (c) {
                         ']' => {
                             if (string_level == expected_string_level) {
-                                if (state == State.LongCommentPossibleEnd) {
+                                if (state == State.long_comment_possible_end) {
                                     result.start = self.index + 1;
-                                    state = State.Start;
+                                    state = State.start;
                                 } else {
                                     self.index += 1;
-                                    result.id = Token.Id.String;
+                                    result.id = Token.Id.string;
                                     break;
                                 }
                             } else {
-                                state = if (state == State.LongCommentPossibleEnd) State.LongComment else State.LongString;
+                                state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
                             }
                         },
                         '=' => {
                             string_level += 1;
                         },
                         else => {
-                            state = if (state == State.LongCommentPossibleEnd) State.LongComment else State.LongString;
+                            state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
                         },
                     },
-                    State.ShortComment => switch (c) {
+                    State.short_comment => switch (c) {
                         '\n', '\r' => {
                             result.start = self.index + 1;
-                            state = State.Start;
+                            state = State.start;
                         },
                         else => {},
                     },
-                    State.Dot => switch (c) {
+                    State.dot => switch (c) {
                         '.' => {
-                            state = State.Concat;
+                            state = State.concat;
                         },
                         '0'...'9' => {
-                            state = State.Number;
+                            state = State.number;
                             number_starting_char = '.';
                             number_is_float = true;
                             if (options.check_next_bug_compat) {
@@ -506,33 +506,33 @@ pub fn Lexer(comptime options: LexerOptions) type {
                         },
                         else => {
                             if (options.check_next_bug_compat and c == '\x00') {
-                                state = State.Concat;
+                                state = State.concat;
                             } else {
-                                result.id = Token.Id.SingleChar;
+                                result.id = Token.Id.single_char;
                                 break;
                             }
                         },
                     },
-                    State.Concat => switch (c) {
+                    State.concat => switch (c) {
                         '.' => {
-                            result.id = Token.Id.Ellipsis;
+                            result.id = Token.Id.ellipsis;
                             // include this .
                             self.index += 1;
                             break;
                         },
                         else => {
                             if (options.check_next_bug_compat and c == '\x00') {
-                                result.id = Token.Id.Ellipsis;
+                                result.id = Token.Id.ellipsis;
                                 // include this .
                                 self.index += 1;
                                 break;
                             } else {
-                                result.id = Token.Id.Concat;
+                                result.id = Token.Id.concat;
                                 break;
                             }
                         },
                     },
-                    State.Number => switch (c) {
+                    State.number => switch (c) {
                         '0'...'9' => {},
                         '.' => {
                             // multiple decimal points not allowed
@@ -546,10 +546,10 @@ pub fn Lexer(comptime options: LexerOptions) type {
                             if (number_starting_char != '0') {
                                 return LexError.MalformedNumber;
                             }
-                            state = State.NumberHexStart;
+                            state = State.number_hex_start;
                         },
                         'e', 'E' => {
-                            state = State.NumberExponentStart;
+                            state = State.number_exponent_start;
                             number_exponent_signed_char = null;
                         },
                         // 'a'...'z' minus e and x
@@ -559,43 +559,43 @@ pub fn Lexer(comptime options: LexerOptions) type {
                         '_' => return LexError.MalformedNumber,
                         else => {
                             if (options.check_next_bug_compat and c == '\x00') {
-                                state = State.NumberExponentStart;
+                                state = State.number_exponent_start;
                                 number_exponent_signed_char = null;
                                 number_is_null_terminated = true;
                             } else {
-                                result.id = Token.Id.Number;
+                                result.id = Token.Id.number;
                                 break;
                             }
                         },
                     },
-                    State.NumberHexStart, State.NumberHex => switch (c) {
+                    State.number_hex_start, State.number_hex => switch (c) {
                         '0'...'9', 'a'...'f', 'A'...'F' => {
-                            state = State.NumberHex;
+                            state = State.number_hex;
                         },
                         'g'...'z', 'G'...'Z' => {
                             return LexError.MalformedNumber;
                         },
                         '_' => return LexError.MalformedNumber,
                         else => {
-                            result.id = Token.Id.Number;
+                            result.id = Token.Id.number;
                             break;
                         },
                     },
-                    State.NumberExponentStart => {
+                    State.number_exponent_start => {
                         const should_consume_anything = options.check_next_bug_compat and number_is_null_terminated;
                         if (should_consume_anything) {
                             switch (c) {
                                 '\x00', '-', '+', '0'...'9', 'a'...'z', 'A'...'Z', '_' => {
-                                    state = State.NumberExponent;
+                                    state = State.number_exponent;
                                 },
                                 else => {
-                                    result.id = Token.Id.Number;
+                                    result.id = Token.Id.number;
                                     break;
                                 },
                             }
                         } else {
                             switch (c) {
-                                '0'...'9' => state = State.NumberExponent,
+                                '0'...'9' => state = State.number_exponent,
                                 '-', '+' => {
                                     if (number_exponent_signed_char) |_| {
                                         // this is an error because e.g. "1e--" would lex as "1e-" and "-"
@@ -613,13 +613,13 @@ pub fn Lexer(comptime options: LexerOptions) type {
                             }
                         }
                     },
-                    State.NumberExponent => {
+                    State.number_exponent => {
                         const should_consume_anything = options.check_next_bug_compat and number_is_null_terminated;
                         if (should_consume_anything) {
                             switch (c) {
                                 '0'...'9', 'a'...'z', 'A'...'Z', '_' => {},
                                 else => {
-                                    result.id = Token.Id.Number;
+                                    result.id = Token.Id.number;
                                     break;
                                 },
                             }
@@ -628,26 +628,26 @@ pub fn Lexer(comptime options: LexerOptions) type {
                                 '0'...'9' => {},
                                 'a'...'z', 'A'...'Z', '_' => return LexError.MalformedNumber,
                                 else => {
-                                    result.id = Token.Id.Number;
+                                    result.id = Token.Id.number;
                                     break;
                                 },
                             }
                         }
                     },
-                    State.CompoundEqual => switch (c) {
+                    State.compound_equal => switch (c) {
                         '=' => {
                             switch (self.buffer[self.index - 1]) {
-                                '>' => result.id = Token.Id.GE,
-                                '<' => result.id = Token.Id.LE,
-                                '~' => result.id = Token.Id.NE,
-                                '=' => result.id = Token.Id.EQ,
+                                '>' => result.id = Token.Id.ge,
+                                '<' => result.id = Token.Id.le,
+                                '~' => result.id = Token.Id.ne,
+                                '=' => result.id = Token.Id.eq,
                                 else => unreachable,
                             }
                             self.index += 1;
                             break;
                         },
                         else => {
-                            result.id = Token.Id.SingleChar;
+                            result.id = Token.Id.single_char;
                             break;
                         },
                     },
@@ -657,56 +657,56 @@ pub fn Lexer(comptime options: LexerOptions) type {
                 // as the else block is only evaluated after a break; in the while loop
                 std.debug.assert(self.index == self.buffer.len);
                 switch (state) {
-                    State.Start => {},
-                    State.Identifier => {
+                    State.start => {},
+                    State.identifier => {
                         const name = self.buffer[result.start..self.index];
                         if (Token.Keyword.idFromName(name)) |id| {
                             result.id = id;
                         }
                     },
-                    State.Dot,
-                    State.Dash,
-                    State.CompoundEqual,
+                    State.dot,
+                    State.dash,
+                    State.compound_equal,
                     => {
-                        result.id = Token.Id.SingleChar;
+                        result.id = Token.Id.single_char;
                     },
-                    State.Concat => {
-                        result.id = Token.Id.Concat;
+                    State.concat => {
+                        result.id = Token.Id.concat;
                     },
-                    State.NumberExponent,
-                    State.NumberHex,
-                    State.Number,
+                    State.number_exponent,
+                    State.number_hex,
+                    State.number,
                     => {
-                        result.id = Token.Id.Number;
+                        result.id = Token.Id.number;
                     },
-                    State.CommentStart,
-                    State.ShortComment,
-                    State.LongCommentStart,
+                    State.comment_start,
+                    State.short_comment,
+                    State.long_comment_start,
                     => {
                         result.start = self.index;
                     },
-                    State.LongStringStart => {
+                    State.long_string_start => {
                         if (expected_string_level > 0) {
                             return LexError.InvalidLongStringDelimiter;
                         } else {
-                            result.id = Token.Id.SingleChar;
+                            result.id = Token.Id.single_char;
                         }
                     },
-                    State.LongCommentPossibleEnd,
-                    State.LongComment,
+                    State.long_comment_possible_end,
+                    State.long_comment,
                     => return LexError.UnfinishedLongComment,
-                    State.LongStringPossibleEnd,
-                    State.LongString,
+                    State.long_string_possible_end,
+                    State.long_string,
                     => return LexError.UnfinishedLongString,
-                    State.StringLiteral,
-                    State.StringLiteralBackslash,
-                    State.StringLiteralBackslashLineEndings,
+                    State.string_literal,
+                    State.string_literal_backslash,
+                    State.string_literal_backslash_line_endings,
                     => return LexError.UnfinishedString,
-                    State.NumberHexStart,
-                    State.NumberExponentStart,
+                    State.number_hex_start,
+                    State.number_exponent_start,
                     => {
                         if (options.check_next_bug_compat and number_is_null_terminated) {
-                            result.id = Token.Id.Number;
+                            result.id = Token.Id.number;
                         } else {
                             return LexError.MalformedNumber;
                         }
@@ -722,7 +722,7 @@ pub fn Lexer(comptime options: LexerOptions) type {
                 }
             }
 
-            if (result.id == Token.Id.SingleChar) {
+            if (result.id == Token.Id.single_char) {
                 result.char = self.buffer[result.start];
             }
 
@@ -742,174 +742,174 @@ pub fn Lexer(comptime options: LexerOptions) type {
 
 test "hello \"world\"" {
     try testLex("local hello = \"wor\\\"ld\"", &[_]Token.Id{
-        Token.Id.Keyword_local,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.String,
+        Token.Id.keyword_local,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.string,
     });
 }
 
 test "hello 'world'" {
     try testLex("local hello = 'wor\\'ld'", &[_]Token.Id{
-        Token.Id.Keyword_local,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.String,
+        Token.Id.keyword_local,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.string,
     });
 }
 
 test "strings" {
     // none of these escaped chars have any meaning, but Lua allows
     // any character to be escaped so this should lex just fine
-    try testLex("'\\e\\s\\c\\ any char'", &[_]Token.Id{Token.Id.String});
-    try testLex("'\\1'", &[_]Token.Id{Token.Id.String});
-    try testLex("'\\12'", &[_]Token.Id{Token.Id.String});
-    try testLex("'\\123'", &[_]Token.Id{Token.Id.String});
-    try testLex("'\\1234'", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\e\\s\\c\\ any char'", &[_]Token.Id{Token.Id.string});
+    try testLex("'\\1'", &[_]Token.Id{Token.Id.string});
+    try testLex("'\\12'", &[_]Token.Id{Token.Id.string});
+    try testLex("'\\123'", &[_]Token.Id{Token.Id.string});
+    try testLex("'\\1234'", &[_]Token.Id{Token.Id.string});
     // carriage returns and newlines can be escaped with \
-    try testLex("'\\\n\\\r'", &[_]Token.Id{Token.Id.String});
-    try testLex("\".\\\x0d\\\\\\\".\\\x0d\xa5[\\ArA\"", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\\n\\\r'", &[_]Token.Id{Token.Id.string});
+    try testLex("\".\\\x0d\\\\\\\".\\\x0d\xa5[\\ArA\"", &[_]Token.Id{Token.Id.string});
     // a pair of CR/LF can be escaped with a single \ (either CRLF or LFCR)
-    try testLex("'\\\r\n'", &[_]Token.Id{Token.Id.String});
-    try testLex("'\\\n\r'", &[_]Token.Id{Token.Id.String});
+    try testLex("'\\\r\n'", &[_]Token.Id{Token.Id.string});
+    try testLex("'\\\n\r'", &[_]Token.Id{Token.Id.string});
 }
 
 test "long strings" {
-    try testLex("[[]]", &[_]Token.Id{Token.Id.String});
-    try testLex("[===[\nhello\nworld\n]===]", &[_]Token.Id{Token.Id.String});
-    try testLex("[]", &[_]Token.Id{ Token.Id.SingleChar, Token.Id.SingleChar });
+    try testLex("[[]]", &[_]Token.Id{Token.Id.string});
+    try testLex("[===[\nhello\nworld\n]===]", &[_]Token.Id{Token.Id.string});
+    try testLex("[]", &[_]Token.Id{ Token.Id.single_char, Token.Id.single_char });
     // TODO: this depends on LUA_COMPAT_LSTR
-    try testLex("[[ [[ ]]", &[_]Token.Id{Token.Id.String});
+    try testLex("[[ [[ ]]", &[_]Token.Id{Token.Id.string});
     // this is always allowed
-    try testLex("[=[ [[ ]] ]=]", &[_]Token.Id{Token.Id.String});
+    try testLex("[=[ [[ ]] ]=]", &[_]Token.Id{Token.Id.string});
 }
 
 test "comments and dashes" {
-    try testLex("-", &[_]Token.Id{Token.Id.SingleChar});
-    try testLex("a-b", &[_]Token.Id{ Token.Id.Name, Token.Id.SingleChar, Token.Id.Name });
+    try testLex("-", &[_]Token.Id{Token.Id.single_char});
+    try testLex("a-b", &[_]Token.Id{ Token.Id.name, Token.Id.single_char, Token.Id.name });
     try testLex("--", &[_]Token.Id{});
     try testLex("--local hello = 'wor\\'ld'", &[_]Token.Id{});
-    try testLex("--[this is a short comment\nreturn", &[_]Token.Id{Token.Id.Keyword_return});
-    try testLex("--\rreturn", &[_]Token.Id{Token.Id.Keyword_return});
+    try testLex("--[this is a short comment\nreturn", &[_]Token.Id{Token.Id.keyword_return});
+    try testLex("--\rreturn", &[_]Token.Id{Token.Id.keyword_return});
     try testLex("--[[local hello = 'wor\\'ld']]", &[_]Token.Id{});
     try testLex("--[==[\nlocal\nhello\n=\n'world'\n]==]", &[_]Token.Id{});
     try testLex("--[==", &[_]Token.Id{});
-    try testLex("--[\n]]", &[_]Token.Id{ Token.Id.SingleChar, Token.Id.SingleChar });
+    try testLex("--[\n]]", &[_]Token.Id{ Token.Id.single_char, Token.Id.single_char });
 }
 
 test "whitespace" {
     // form feed
-    try testLex("_\x0c_W_", &[_]Token.Id{ Token.Id.Name, Token.Id.Name });
+    try testLex("_\x0c_W_", &[_]Token.Id{ Token.Id.name, Token.Id.name });
     // vertical tab
-    try testLex("_\x0b_W_", &[_]Token.Id{ Token.Id.Name, Token.Id.Name });
+    try testLex("_\x0b_W_", &[_]Token.Id{ Token.Id.name, Token.Id.name });
 }
 
 test "dots, concat, ellipsis" {
-    try testLex(".", &[_]Token.Id{Token.Id.SingleChar});
-    try testLex("a.b", &[_]Token.Id{ Token.Id.Name, Token.Id.SingleChar, Token.Id.Name });
-    try testLex("..", &[_]Token.Id{Token.Id.Concat});
+    try testLex(".", &[_]Token.Id{Token.Id.single_char});
+    try testLex("a.b", &[_]Token.Id{ Token.Id.name, Token.Id.single_char, Token.Id.name });
+    try testLex("..", &[_]Token.Id{Token.Id.concat});
     try testLex("a..b.c", &[_]Token.Id{
-        Token.Id.Name,
-        Token.Id.Concat,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.Name,
+        Token.Id.name,
+        Token.Id.concat,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.name,
     });
     // this is valid Lua, apparently (abc will be true, test will be the first value in ...)
     try testLex("test=...abc=true", &[_]Token.Id{
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.Ellipsis,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.Keyword_true,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.ellipsis,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.keyword_true,
     });
 }
 
 test "= and compound = operators" {
-    try testLex("=", &[_]Token.Id{Token.Id.SingleChar});
-    try testLex("a=b", &[_]Token.Id{ Token.Id.Name, Token.Id.SingleChar, Token.Id.Name });
-    try testLex("a==b", &[_]Token.Id{ Token.Id.Name, Token.Id.EQ, Token.Id.Name });
-    try testLex(">=", &[_]Token.Id{Token.Id.GE});
+    try testLex("=", &[_]Token.Id{Token.Id.single_char});
+    try testLex("a=b", &[_]Token.Id{ Token.Id.name, Token.Id.single_char, Token.Id.name });
+    try testLex("a==b", &[_]Token.Id{ Token.Id.name, Token.Id.eq, Token.Id.name });
+    try testLex(">=", &[_]Token.Id{Token.Id.ge});
     try testLex("if a~=b and a<=b and b<a then end", &[_]Token.Id{
-        Token.Id.Keyword_if,
-        Token.Id.Name,
-        Token.Id.NE,
-        Token.Id.Name,
-        Token.Id.Keyword_and,
-        Token.Id.Name,
-        Token.Id.LE,
-        Token.Id.Name,
-        Token.Id.Keyword_and,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.Name,
-        Token.Id.Keyword_then,
-        Token.Id.Keyword_end,
+        Token.Id.keyword_if,
+        Token.Id.name,
+        Token.Id.ne,
+        Token.Id.name,
+        Token.Id.keyword_and,
+        Token.Id.name,
+        Token.Id.le,
+        Token.Id.name,
+        Token.Id.keyword_and,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.name,
+        Token.Id.keyword_then,
+        Token.Id.keyword_end,
     });
 }
 
 test "numbers" {
     // from the Lua 5.1 manual
-    try testLex("3", &[_]Token.Id{Token.Id.Number});
-    try testLex("3.0", &[_]Token.Id{Token.Id.Number});
-    try testLex("3.1416", &[_]Token.Id{Token.Id.Number});
-    try testLex("314.16e-2", &[_]Token.Id{Token.Id.Number});
-    try testLex("0.31416E1", &[_]Token.Id{Token.Id.Number});
-    try testLex("0xff", &[_]Token.Id{Token.Id.Number});
-    try testLex("0x56", &[_]Token.Id{Token.Id.Number});
+    try testLex("3", &[_]Token.Id{Token.Id.number});
+    try testLex("3.0", &[_]Token.Id{Token.Id.number});
+    try testLex("3.1416", &[_]Token.Id{Token.Id.number});
+    try testLex("314.16e-2", &[_]Token.Id{Token.Id.number});
+    try testLex("0.31416E1", &[_]Token.Id{Token.Id.number});
+    try testLex("0xff", &[_]Token.Id{Token.Id.number});
+    try testLex("0x56", &[_]Token.Id{Token.Id.number});
 
     // other cases
-    try testLex(".1", &[_]Token.Id{Token.Id.Number});
-    try testLex("0xFF", &[_]Token.Id{Token.Id.Number});
-    try testLex("0XeF", &[_]Token.Id{Token.Id.Number});
-    try testLex("1e+3", &[_]Token.Id{Token.Id.Number});
+    try testLex(".1", &[_]Token.Id{Token.Id.number});
+    try testLex("0xFF", &[_]Token.Id{Token.Id.number});
+    try testLex("0XeF", &[_]Token.Id{Token.Id.number});
+    try testLex("1e+3", &[_]Token.Id{Token.Id.number});
     // 3e2 and .52 should lex as separate tokens
-    try testLex("3e2.52", &[_]Token.Id{ Token.Id.Number, Token.Id.Number });
+    try testLex("3e2.52", &[_]Token.Id{ Token.Id.number, Token.Id.number });
 }
 
 test "LexError.MalformedNumber" {
-    expectLexError(LexError.MalformedNumber, testLex("1e", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0z", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0x", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0xabcz", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("1xabc", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1.e2", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1.", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1.2", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e3a", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e-", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e-a", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e+", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e--2", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e-)2", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e+-2", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLex("1e", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0z", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0x", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0xabcz", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("1xabc", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1.e2", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1.", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1.2", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1e3a", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1e-", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1e-a", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1e+", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1e--2", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1e-)2", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0.1e+-2", &[_]Token.Id{Token.Id.number}));
     // Lua's lexer weirdly 'allows'/consumes _ when lexing numbers (see llex.c:201 in 5.1.5),
     // but as far as I can tell there are no valid ways to define a number with a _ in it.
     // Either way, we should fail with MalformedNumber in the same ways that Lua does,
     // so we need to handle _ similarly to the Lua lexer.
-    expectLexError(LexError.MalformedNumber, testLex("1_2", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0x2__", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("0x__", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("1e__", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex("1e-1_", &[_]Token.Id{Token.Id.Number}));
-    expectLexError(LexError.MalformedNumber, testLex(".1_", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLex("1_2", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0x2__", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("0x__", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("1e__", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex("1e-1_", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLex(".1_", &[_]Token.Id{Token.Id.number}));
 }
 
 test "LexError.InvalidLongStringDelimiter" {
     // see comment in Lexer.next near the return of LexError.InvalidLongStringDelimiter
-    const simple = testLex("[==]", &[_]Token.Id{Token.Id.String});
+    const simple = testLex("[==]", &[_]Token.Id{Token.Id.string});
     expectLexError(LexError.InvalidLongStringDelimiter, simple);
 
-    const number = testLex("[=======4", &[_]Token.Id{Token.Id.String});
+    const number = testLex("[=======4", &[_]Token.Id{Token.Id.string});
     expectLexError(LexError.InvalidLongStringDelimiter, number);
 
-    const eof = testLex("[==", &[_]Token.Id{Token.Id.String});
+    const eof = testLex("[==", &[_]Token.Id{Token.Id.string});
     expectLexError(LexError.InvalidLongStringDelimiter, eof);
 }
 
 test "LexError.EscapeSequenceTooLarge" {
-    expectLexError(LexError.EscapeSequenceTooLarge, testLex("'\\256'", &[_]Token.Id{Token.Id.String}));
+    expectLexError(LexError.EscapeSequenceTooLarge, testLex("'\\256'", &[_]Token.Id{Token.Id.string}));
 }
 
 test "LexError.UnfinishedLongComment" {
@@ -922,18 +922,18 @@ test "LexError.UnfinishedLongComment" {
 
 test "LexError.UnfinishedString" {
     const missingQuoteResult = testLex("local hello = \"wor\\\"ld", &[_]Token.Id{
-        Token.Id.Keyword_local,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.String,
+        Token.Id.keyword_local,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.string,
     });
     expectLexError(LexError.UnfinishedString, missingQuoteResult);
 
     const newlineResult = testLex("local hello = \"wor\\\"ld\n\"", &[_]Token.Id{
-        Token.Id.Keyword_local,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.String,
+        Token.Id.keyword_local,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.string,
     });
     expectLexError(LexError.UnfinishedString, newlineResult);
 }
@@ -941,48 +941,48 @@ test "LexError.UnfinishedString" {
 test "5.1 check_next bug compat on" {
     const CheckNextCompatLexer = Lexer(LexerOptions{ .check_next_bug_compat = true });
 
-    try testLexType(CheckNextCompatLexer, ".\x00", &[_]Token.Id{Token.Id.Concat});
-    try testLexType(CheckNextCompatLexer, ".\x00\x00", &[_]Token.Id{Token.Id.Ellipsis});
-    try testLexType(CheckNextCompatLexer, "..\x00", &[_]Token.Id{Token.Id.Ellipsis});
-    try testLexType(CheckNextCompatLexer, "1\x00", &[_]Token.Id{Token.Id.Number});
-    try testLexType(CheckNextCompatLexer, "1\x00-5", &[_]Token.Id{Token.Id.Number});
-    try testLexType(CheckNextCompatLexer, "1\x00\x005", &[_]Token.Id{Token.Id.Number});
-    try testLexType(CheckNextCompatLexer, "1\x00\x00anythingcangoherenow", &[_]Token.Id{Token.Id.Number});
-    try testLexType(CheckNextCompatLexer, ".0\x00", &[_]Token.Id{Token.Id.Number});
-    try testLexType(CheckNextCompatLexer, ".0\x00)", &[_]Token.Id{ Token.Id.Number, Token.Id.SingleChar });
+    try testLexType(CheckNextCompatLexer, ".\x00", &[_]Token.Id{Token.Id.concat});
+    try testLexType(CheckNextCompatLexer, ".\x00\x00", &[_]Token.Id{Token.Id.ellipsis});
+    try testLexType(CheckNextCompatLexer, "..\x00", &[_]Token.Id{Token.Id.ellipsis});
+    try testLexType(CheckNextCompatLexer, "1\x00", &[_]Token.Id{Token.Id.number});
+    try testLexType(CheckNextCompatLexer, "1\x00-5", &[_]Token.Id{Token.Id.number});
+    try testLexType(CheckNextCompatLexer, "1\x00\x005", &[_]Token.Id{Token.Id.number});
+    try testLexType(CheckNextCompatLexer, "1\x00\x00anythingcangoherenow", &[_]Token.Id{Token.Id.number});
+    try testLexType(CheckNextCompatLexer, ".0\x00", &[_]Token.Id{Token.Id.number});
+    try testLexType(CheckNextCompatLexer, ".0\x00)", &[_]Token.Id{ Token.Id.number, Token.Id.single_char });
     // should lex as: 5\x00z5 ; \x00 ; 9\x00\x00 ; \x00
     try testLexType(CheckNextCompatLexer, "5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
-        Token.Id.Number,
-        Token.Id.SingleChar,
-        Token.Id.Number,
-        Token.Id.SingleChar,
+        Token.Id.number,
+        Token.Id.single_char,
+        Token.Id.number,
+        Token.Id.single_char,
     });
     try testLexType(CheckNextCompatLexer, "5\x00--z5", &[_]Token.Id{
-        Token.Id.Number,
-        Token.Id.SingleChar,
-        Token.Id.Name,
+        Token.Id.number,
+        Token.Id.single_char,
+        Token.Id.name,
     });
-    expectLexError(LexError.MalformedNumber, testLexType(CheckNextCompatLexer, "1e\x005", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLexType(CheckNextCompatLexer, "1e\x005", &[_]Token.Id{Token.Id.number}));
 }
 
 test "5.1 check_next bug compat off" {
     const NoCheckNextCompatLexer = Lexer(LexerOptions{ .check_next_bug_compat = false });
 
-    try testLexType(NoCheckNextCompatLexer, ".\x00", &[_]Token.Id{ Token.Id.SingleChar, Token.Id.SingleChar });
-    try testLexType(NoCheckNextCompatLexer, "1\x00", &[_]Token.Id{ Token.Id.Number, Token.Id.SingleChar });
-    try testLexType(NoCheckNextCompatLexer, "1\x00-5", &[_]Token.Id{ Token.Id.Number, Token.Id.SingleChar, Token.Id.SingleChar, Token.Id.Number });
+    try testLexType(NoCheckNextCompatLexer, ".\x00", &[_]Token.Id{ Token.Id.single_char, Token.Id.single_char });
+    try testLexType(NoCheckNextCompatLexer, "1\x00", &[_]Token.Id{ Token.Id.number, Token.Id.single_char });
+    try testLexType(NoCheckNextCompatLexer, "1\x00-5", &[_]Token.Id{ Token.Id.number, Token.Id.single_char, Token.Id.single_char, Token.Id.number });
     // should lex as: 5 ; \x00 ; z5 ; \x00 ; 9 ; \x00 ; \x00 ; \x00
     try testLexType(NoCheckNextCompatLexer, "5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
-        Token.Id.Number,
-        Token.Id.SingleChar,
-        Token.Id.Name,
-        Token.Id.SingleChar,
-        Token.Id.Number,
-        Token.Id.SingleChar,
-        Token.Id.SingleChar,
-        Token.Id.SingleChar,
+        Token.Id.number,
+        Token.Id.single_char,
+        Token.Id.name,
+        Token.Id.single_char,
+        Token.Id.number,
+        Token.Id.single_char,
+        Token.Id.single_char,
+        Token.Id.single_char,
     });
-    expectLexError(LexError.MalformedNumber, testLexType(NoCheckNextCompatLexer, "1e\x005", &[_]Token.Id{Token.Id.Number}));
+    expectLexError(LexError.MalformedNumber, testLexType(NoCheckNextCompatLexer, "1e\x005", &[_]Token.Id{Token.Id.number}));
 }
 
 fn expectLexError(expected: LexError, actual: var) void {
@@ -1004,5 +1004,5 @@ fn testLexType(comptime lexer_type: type, source: []const u8, expected_tokens: [
         std.testing.expectEqual(expected_token_id, token.id);
     }
     const last_token = try lexer.next();
-    std.testing.expectEqual(Token.Id.Eof, last_token.id);
+    std.testing.expectEqual(Token.Id.eof, last_token.id);
 }

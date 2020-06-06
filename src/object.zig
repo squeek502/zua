@@ -4,20 +4,20 @@ const std = @import("std");
 // as needed
 
 pub const Type = enum {
-    None,
-    Nil,
-    Boolean,
-    LightUserdata,
-    Number,
-    String,
-    Table,
-    Function,
-    Userdata,
-    Thread,
+    none,
+    nil,
+    boolean,
+    light_userdata,
+    number,
+    string,
+    table,
+    function,
+    userdata,
+    thread,
 
     pub fn isCollectable(self: Type) bool {
         switch (self) {
-            .String, .Table, .Function, .Userdata, .Thread => return true,
+            .string, .table, .function, .userdata, .thread => return true,
             else => return false,
         }
     }
@@ -26,16 +26,16 @@ pub const Type = enum {
 pub const GCObject = struct {};
 
 pub const Value = union(Type) {
-    None: void,
-    Nil: void,
-    Boolean: bool,
-    LightUserdata: *c_void, // TODO: what type should this be?
-    Number: f64,
-    String: *GCObject,
-    Table: *GCObject,
-    Function: *GCObject,
-    Userdata: *GCObject,
-    Thread: *GCObject,
+    none: void,
+    nil: void,
+    boolean: bool,
+    light_userdata: *c_void, // TODO: what type should this be?
+    number: f64,
+    string: *GCObject,
+    table: *GCObject,
+    function: *GCObject,
+    userdata: *GCObject,
+    thread: *GCObject,
 
     pub fn getType(self: Value) Type {
         return @as(Type, self);
@@ -47,9 +47,9 @@ pub const Value = union(Type) {
 };
 
 test "collectability" {
-    const nil = Value.Nil;
+    const nil = Value.nil;
     var dummyObj = GCObject{};
-    const str = Value{ .String = &dummyObj };
+    const str = Value{ .string = &dummyObj };
     std.testing.expect(!nil.isCollectable());
     std.testing.expect(str.isCollectable());
 }

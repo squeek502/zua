@@ -50,37 +50,37 @@ pub fn parseString(source_raw: []const u8, dest_buf: []u8) []u8 {
     };
 
     const State = enum {
-        Normal,
-        Escaped,
-        EscapedNumerals,
-        EscapedLineEndings,
+        normal,
+        escaped,
+        escaped_numerals,
+        escaped_line_endings,
     };
 
     var writer = SliceWriter{ .slice = dest_buf };
 
     var string_escape_n: u8 = 0;
     var string_escape_i: std.math.IntFittingRange(0, 3) = 0;
-    var state: State = State.Normal;
+    var state: State = State.normal;
     var index: usize = 0;
     while (index < source.len) : (index += 1) {
         const c = source[index];
         switch (state) {
-            State.Normal => switch (c) {
+            State.normal => switch (c) {
                 // Lua's string parser transforms all \r to \n
                 '\r' => writer.write('\n'),
-                '\\' => state = State.Escaped,
+                '\\' => state = State.escaped,
                 else => writer.write(c),
             },
-            State.Escaped => switch (c) {
+            State.escaped => switch (c) {
                 '0'...'9' => {
                     string_escape_n = c - '0';
                     string_escape_i = 1;
-                    state = State.EscapedNumerals;
+                    state = State.escaped_numerals;
                 },
                 '\r', '\n' => {
                     // escaped \r and \n get transformed to \n
                     writer.write('\n');
-                    state = State.EscapedLineEndings;
+                    state = State.escaped_line_endings;
                 },
                 else => {
                     switch (c) {
@@ -93,33 +93,33 @@ pub fn parseString(source_raw: []const u8, dest_buf: []u8) []u8 {
                         'v' => writer.write('\x0B'),
                         else => writer.write(c),
                     }
-                    state = State.Normal;
+                    state = State.normal;
                 },
             },
-            State.EscapedNumerals => switch(c) {
+            State.escaped_numerals => switch (c) {
                 '0'...'9' => {
                     string_escape_n = 10 * string_escape_n + (c - '0');
                     string_escape_i += 1;
                     if (string_escape_i == 3) {
                         writer.write(string_escape_n);
-                        state = State.Normal;
+                        state = State.normal;
                     }
                 },
                 else => {
                     writer.write(string_escape_n);
                     // backtrack so that we handle the current char properly
                     index -= 1;
-                    state = State.Normal;
+                    state = State.normal;
                 },
             },
-            State.EscapedLineEndings => switch(c) {
+            State.escaped_line_endings => switch (c) {
                 '\r', '\n' => {
-                    state = State.Normal;
+                    state = State.normal;
                 },
                 else => {
                     // backtrack so that we handle the current char properly
                     index -= 1;
-                    state = State.Normal;
+                    state = State.normal;
                 },
             },
         }
@@ -128,11 +128,11 @@ pub fn parseString(source_raw: []const u8, dest_buf: []u8) []u8 {
     // since we could have hit the end of the string while unsure
     // if a \ddd pattern was finished
     switch (state) {
-        State.EscapedNumerals => {
+        State.escaped_numerals => {
             writer.write(string_escape_n);
         },
-        State.Normal,
-        State.EscapedLineEndings,
+        State.normal,
+        State.escaped_line_endings,
         => {},
         else => unreachable,
     }
@@ -177,13 +177,13 @@ pub fn parseNumber(source: []const u8) f64 {
     //   https://github.com/ziglang/zig/issues/2047
     if (std.fmt.parseFloat(f64, source)) |number| {
         return number;
-    } else |err| switch(err) {
+    } else |err| switch (err) {
         error.InvalidCharacter => {},
     }
     if (source[0] == '0' and (source[1] == 'x' or source[1] == 'X')) {
         if (std.fmt.parseUnsigned(u64, source[2..], 16)) |number| {
             return @intToFloat(f64, number);
-        } else |err| switch(err) {
+        } else |err| switch (err) {
             error.InvalidCharacter => unreachable,
             error.Overflow => return std.math.inf(f64),
         }

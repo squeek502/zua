@@ -20,7 +20,7 @@ test "bench fuzz_llex inputs" {
     const build_options = @import("build_options");
     const inputs_dir_opt = build_options.fuzz_lex_inputs_dir;
     // resolve this now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{ inputs_dir_opt });
+    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
 
     std.debug.warn("Mode: {}\n", .{@import("builtin").mode});
     var walker = try std.fs.walkPath(allocator, inputs_dir);
@@ -40,7 +40,7 @@ test "bench fuzz_llex inputs" {
                 const token = lexer.next() catch |e| {
                     break;
                 };
-                if (token.id == lex.Token.Id.Eof) {
+                if (token.id == lex.Token.Id.eof) {
                     break;
                 }
             }
@@ -48,7 +48,7 @@ test "bench fuzz_llex inputs" {
         time += endMeasure(num_iterations);
         n += 1;
     }
-    std.debug.warn("Lexed {} files in {}ns ({d}ms)\n", .{n, time, @intToFloat(f64, time) / (std.time.ns_per_s / std.time.ms_per_s)});
+    std.debug.warn("Lexed {} files in {}ns ({d}ms)\n", .{ n, time, @intToFloat(f64, time) / (std.time.ns_per_s / std.time.ms_per_s) });
 }
 
 fn beginMeasure() void {

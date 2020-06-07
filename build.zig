@@ -39,9 +39,9 @@ pub fn build(b: *Builder) void {
     const bench_lex_test_step = b.step("bench_lex", "Bench lexer against a fuzzed corpus from fuzzing-lua");
     bench_lex_test_step.dependOn(&bench_lex_tests.step);
 
-    const fuzz_strings_inputs_dir_default = "test/strings/inputs";
-    const fuzz_strings_outputs_dir_default = "test/strings/outputs";
-    const fuzz_strings_gen_dir_default = "test/strings/generated";
+    const fuzz_strings_inputs_dir_default = "test/corpus/fuzz_strings";
+    const fuzz_strings_outputs_dir_default = "test/output/fuzz_strings";
+    const fuzz_strings_gen_dir_default = "test/corpus/fuzz_strings_generated";
     const fuzz_strings_inputs_dir = b.option([]const u8, "fuzz_strings_inputs_dir", "Directory with input strings for string parsing tests") orelse fuzz_strings_inputs_dir_default;
     const fuzz_strings_outputs_dir = b.option([]const u8, "fuzz_strings_outputs_dir", "Directory with output strings for string parsing tests") orelse fuzz_strings_outputs_dir_default;
     const fuzz_strings_gen_dir = b.option([]const u8, "fuzz_strings_gen_dir", "Directory to output generated string inputs to") orelse fuzz_strings_gen_dir_default;

@@ -2,9 +2,9 @@ const std = @import("std");
 const lex = @import("zua").lex;
 
 // Tests for comparing the tokens of Zua's lexer with Lua's.
-// Expects @import("build_options").fuzz_lex_inputs_dir to be a path to
+// Expects @import("build_options").fuzzed_lex_inputs_dir to be a path to
 // a directory containing a corpus of inputs to test and
-// @import("build_options").fuzz_lex_outputs_dir to be a path to a
+// @import("build_options").fuzzed_lex_outputs_dir to be a path to a
 // directory containing the tokens obtained by running the input
 // through the Lua lexer (in a specific format).
 //
@@ -15,8 +15,8 @@ const verboseTestPrinting = false;
 const printTokenBounds = false;
 
 const build_options = @import("build_options");
-const inputs_dir_opt = build_options.fuzz_lex_inputs_dir;
-const outputs_dir_opt = build_options.fuzz_lex_outputs_dir;
+const inputs_dir_opt = build_options.fuzzed_lex_inputs_dir;
+const outputs_dir_opt = build_options.fuzzed_lex_outputs_dir;
 
 test "fuzz_llex input/output pairs" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);

@@ -19,47 +19,47 @@ pub fn build(b: *Builder) void {
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&tests.step);
 
-    const fuzz_lex_inputs_dir_default = "test/corpus/fuzz_llex";
-    const fuzz_lex_outputs_dir_default = "test/output/fuzz_llex";
-    const fuzz_lex_inputs_dir = b.option([]const u8, "fuzz_lex_inputs_dir", "Directory with input corpus for fuzz_lex tests") orelse fuzz_lex_inputs_dir_default;
-    const fuzz_lex_outputs_dir = b.option([]const u8, "fuzz_lex_outputs_dir", "Directory with expected outputs for fuzz_lex tests") orelse fuzz_lex_outputs_dir_default;
+    const fuzzed_lex_inputs_dir_default = "test/corpus/fuzz_llex";
+    const fuzzed_lex_outputs_dir_default = "test/output/fuzz_llex";
+    const fuzzed_lex_inputs_dir = b.option([]const u8, "fuzzed_lex_inputs_dir", "Directory with input corpus for fuzzed_lex tests") orelse fuzzed_lex_inputs_dir_default;
+    const fuzzed_lex_outputs_dir = b.option([]const u8, "fuzzed_lex_outputs_dir", "Directory with expected outputs for fuzzed_lex tests") orelse fuzzed_lex_outputs_dir_default;
 
-    var fuzz_lex_tests = b.addTest("test/fuzz_lex.zig");
-    fuzz_lex_tests.setBuildMode(mode);
-    fuzz_lex_tests.addBuildOption([]const u8, "fuzz_lex_inputs_dir", b.fmt("\"{}\"", .{fuzz_lex_inputs_dir}));
-    fuzz_lex_tests.addBuildOption([]const u8, "fuzz_lex_outputs_dir", b.fmt("\"{}\"", .{fuzz_lex_outputs_dir}));
-    fuzz_lex_tests.addPackagePath("zua", "src/zua.zig");
-    const fuzz_lex_test_step = b.step("fuzz_lex", "Test lexer against a fuzzed corpus from fuzzing-lua");
-    fuzz_lex_test_step.dependOn(&fuzz_lex_tests.step);
+    var fuzzed_lex_tests = b.addTest("test/fuzzed_lex.zig");
+    fuzzed_lex_tests.setBuildMode(mode);
+    fuzzed_lex_tests.addBuildOption([]const u8, "fuzzed_lex_inputs_dir", b.fmt("\"{}\"", .{fuzzed_lex_inputs_dir}));
+    fuzzed_lex_tests.addBuildOption([]const u8, "fuzzed_lex_outputs_dir", b.fmt("\"{}\"", .{fuzzed_lex_outputs_dir}));
+    fuzzed_lex_tests.addPackagePath("zua", "src/zua.zig");
+    const fuzzed_lex_test_step = b.step("fuzzed_lex", "Test lexer against a fuzzed corpus from fuzzing-lua");
+    fuzzed_lex_test_step.dependOn(&fuzzed_lex_tests.step);
 
     var bench_lex_tests = b.addTest("test/bench_lex.zig");
     bench_lex_tests.setBuildMode(.ReleaseFast);
-    bench_lex_tests.addBuildOption([]const u8, "fuzz_lex_inputs_dir", b.fmt("\"{}\"", .{fuzz_lex_inputs_dir}));
+    bench_lex_tests.addBuildOption([]const u8, "fuzzed_lex_inputs_dir", b.fmt("\"{}\"", .{fuzzed_lex_inputs_dir}));
     bench_lex_tests.addPackagePath("zua", "src/zua.zig");
     const bench_lex_test_step = b.step("bench_lex", "Bench lexer against a fuzzed corpus from fuzzing-lua");
     bench_lex_test_step.dependOn(&bench_lex_tests.step);
 
-    const fuzz_strings_inputs_dir_default = "test/corpus/fuzz_strings";
-    const fuzz_strings_outputs_dir_default = "test/output/fuzz_strings";
-    const fuzz_strings_gen_dir_default = "test/corpus/fuzz_strings_generated";
-    const fuzz_strings_inputs_dir = b.option([]const u8, "fuzz_strings_inputs_dir", "Directory with input strings for string parsing tests") orelse fuzz_strings_inputs_dir_default;
-    const fuzz_strings_outputs_dir = b.option([]const u8, "fuzz_strings_outputs_dir", "Directory with output strings for string parsing tests") orelse fuzz_strings_outputs_dir_default;
-    const fuzz_strings_gen_dir = b.option([]const u8, "fuzz_strings_gen_dir", "Directory to output generated string inputs to") orelse fuzz_strings_gen_dir_default;
+    const fuzzed_strings_inputs_dir_default = "test/corpus/fuzz_strings";
+    const fuzzed_strings_outputs_dir_default = "test/output/fuzz_strings";
+    const fuzzed_strings_gen_dir_default = "test/corpus/fuzz_strings_generated";
+    const fuzzed_strings_inputs_dir = b.option([]const u8, "fuzzed_strings_inputs_dir", "Directory with input strings for string parsing tests") orelse fuzzed_strings_inputs_dir_default;
+    const fuzzed_strings_outputs_dir = b.option([]const u8, "fuzzed_strings_outputs_dir", "Directory with output strings for string parsing tests") orelse fuzzed_strings_outputs_dir_default;
+    const fuzzed_strings_gen_dir = b.option([]const u8, "fuzzed_strings_gen_dir", "Directory to output generated string inputs to") orelse fuzzed_strings_gen_dir_default;
 
-    var fuzz_strings = b.addTest("test/fuzz_strings.zig");
-    fuzz_strings.setBuildMode(mode);
-    fuzz_strings.addBuildOption([]const u8, "fuzz_strings_inputs_dir", b.fmt("\"{}\"", .{fuzz_strings_inputs_dir}));
-    fuzz_strings.addBuildOption([]const u8, "fuzz_strings_outputs_dir", b.fmt("\"{}\"", .{fuzz_strings_outputs_dir}));
-    fuzz_strings.addPackagePath("zua", "src/zua.zig");
-    const fuzz_strings_step = b.step("fuzz_strings", "Test string parsing against a fuzzed corpus from fuzzing-lua");
-    fuzz_strings_step.dependOn(&fuzz_strings.step);
+    var fuzzed_strings = b.addTest("test/fuzzed_strings.zig");
+    fuzzed_strings.setBuildMode(mode);
+    fuzzed_strings.addBuildOption([]const u8, "fuzzed_strings_inputs_dir", b.fmt("\"{}\"", .{fuzzed_strings_inputs_dir}));
+    fuzzed_strings.addBuildOption([]const u8, "fuzzed_strings_outputs_dir", b.fmt("\"{}\"", .{fuzzed_strings_outputs_dir}));
+    fuzzed_strings.addPackagePath("zua", "src/zua.zig");
+    const fuzzed_strings_step = b.step("fuzzed_strings", "Test string parsing against a fuzzed corpus from fuzzing-lua");
+    fuzzed_strings_step.dependOn(&fuzzed_strings.step);
 
-    var fuzz_strings_gen = b.addExecutable("fuzz_strings_gen", "test/fuzz_strings_gen.zig");
-    fuzz_strings_gen.setBuildMode(mode);
-    fuzz_strings_gen.addBuildOption([]const u8, "fuzz_lex_inputs_dir", b.fmt("\"{}\"", .{fuzz_lex_inputs_dir}));
-    fuzz_strings_gen.addBuildOption([]const u8, "fuzz_strings_gen_dir", b.fmt("\"{}\"", .{fuzz_strings_gen_dir}));
-    fuzz_strings_gen.addPackagePath("zua", "src/zua.zig");
+    var fuzzed_strings_gen = b.addExecutable("fuzzed_strings_gen", "test/fuzzed_strings_gen.zig");
+    fuzzed_strings_gen.setBuildMode(mode);
+    fuzzed_strings_gen.addBuildOption([]const u8, "fuzzed_lex_inputs_dir", b.fmt("\"{}\"", .{fuzzed_lex_inputs_dir}));
+    fuzzed_strings_gen.addBuildOption([]const u8, "fuzzed_strings_gen_dir", b.fmt("\"{}\"", .{fuzzed_strings_gen_dir}));
+    fuzzed_strings_gen.addPackagePath("zua", "src/zua.zig");
 
-    const fuzz_strings_gen_run_step = b.step("fuzz_strings_gen_run", "Generate string inputs from a fuzzed corpus of lexer inputs");
-    fuzz_strings_gen_run_step.dependOn(&fuzz_strings_gen.run().step);
+    const fuzzed_strings_gen_run_step = b.step("fuzzed_strings_gen_run", "Generate string inputs from a fuzzed corpus of lexer inputs");
+    fuzzed_strings_gen_run_step.dependOn(&fuzzed_strings_gen.run().step);
 }

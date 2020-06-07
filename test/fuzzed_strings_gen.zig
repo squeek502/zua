@@ -3,15 +3,15 @@ const lex = @import("zua").lex;
 
 // Code for generating a potentially huge collection of
 // files containing the source of every string literal token
-// in the corpus provided in @import("build_options").fuzz_lex_inputs_dir
-// and outputting them to @import("build_options").fuzz_strings_gen_dir
+// in the corpus provided in @import("build_options").fuzzed_lex_inputs_dir
+// and outputting them to @import("build_options").fuzzed_strings_gen_dir
 //
-// This is a building block for use later with fuzz_strings.zig,
+// This is a building block for use later with fuzzed_strings.zig,
 // after minimizing/generating outputs with https://github.com/squeek502/fuzzing-lua
 
 const build_options = @import("build_options");
-const inputs_dir_opt = build_options.fuzz_lex_inputs_dir;
-const outputs_dir_opt = build_options.fuzz_strings_gen_dir;
+const inputs_dir_opt = build_options.fuzzed_lex_inputs_dir;
+const outputs_dir_opt = build_options.fuzzed_strings_gen_dir;
 
 pub fn main() !void {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);

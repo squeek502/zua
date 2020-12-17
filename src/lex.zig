@@ -985,7 +985,7 @@ test "5.1 check_next bug compat off" {
     expectLexError(LexError.MalformedNumber, testLexType(NoCheckNextCompatLexer, "1e\x005", &[_]Token.Id{Token.Id.number}));
 }
 
-fn expectLexError(expected: LexError, actual: var) void {
+fn expectLexError(expected: LexError, actual: anytype) void {
     if (veryVerboseLexing) std.debug.warn("\n", .{});
     std.testing.expectError(expected, actual);
     if (dumpTokensDuringTests) std.debug.warn("{}\n", .{actual});

@@ -13,5 +13,5 @@ test "zua" {
     _ = @import("parse.zig");
     _ = @import("parse_literal.zig");
     _ = @import("object.zig");
-    _ = @import("table.zig");
+    //_ = @import("table.zig");
 }

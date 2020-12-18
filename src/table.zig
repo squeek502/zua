@@ -31,78 +31,20 @@ pub const Table = struct {
 
     const ArrayPortion = std.ArrayList(Value);
     const MapPortion = struct {
-        pub const HashMap: type = std.HashMap(Value, Value, keyHash, keyEql);
-
-        // This is somewhat hacky, since it's a reimplementation of
-        // the private function std.HashMap.keyToIndex
-        fn keyToHashIndex(self: *MapPortion.HashMap, key: Value) usize {
-            return @as(usize, keyHash(key)) & (self.entries.len - 1);
-        }
-
-        fn constrainIndex(self: *MapPortion.HashMap, i: usize) usize {
-            // this is an optimization for modulo of power of two integers;
-            // it requires hm.entries.len to always be a power of two
-            return i & (self.entries.len - 1);
-        }
-
-        // Same thing here, this is a copy of std.HashMap.internalGet
-        // but returns the index rather than the KV
-        pub fn keyToIndex(self: *MapPortion.HashMap, key: Value) ?usize {
-            const start_index = keyToHashIndex(self, key);
-            var roll_over: usize = 0;
-            while (roll_over <= self.max_distance_from_start_index) : (roll_over += 1) {
-                const index = constrainIndex(self, start_index + roll_over);
-                const entry = &self.entries[index];
-
-                if (!entry.used) return null;
-                if (keyEql(entry.kv.key, key)) return index;
-            }
-            return null;
-        }
-
-        /// Like std.HashMap.Iterator but can start from within the middle
-        /// of the map, and therefore can't do the count >= size check
-        /// and instead has to iterate the entire len of the entries array
-        pub const ExhaustiveIterator = struct {
-            hm: *const HashMap,
-            // iterator through the entry array
-            index: usize,
-            // used to detect concurrent modification
-            initial_modification_count: if (std.debug.runtime_safety) u32 else void,
-
-            pub fn next(it: *ExhaustiveIterator) ?*HashMap.KV {
-                if (std.debug.runtime_safety) {
-                    assert(it.initial_modification_count == it.hm.modification_count); // concurrent modification
-                }
-                while (it.index < it.hm.entries.len) : (it.index += 1) {
-                    const entry = &it.hm.entries[it.index];
-                    if (entry.used) {
-                        it.index += 1;
-                        return &entry.kv;
-                    }
-                }
-                return null; // no next item
-            }
-        };
-
-        pub fn exhaustiveIterator(hm: *const MapPortion.HashMap, starting_index: usize) ExhaustiveIterator {
-            return ExhaustiveIterator{
-                .hm = hm,
-                .index = starting_index,
-                .initial_modification_count = hm.modification_count,
-            };
-        }
+        pub const HashMap: type = std.ArrayHashMap(Value, Value, keyHash, keyEql, false);
 
         // TODO: This is woefully underimplemented
         fn keyHash(key: Value) u32 {
             switch (key) {
                 .boolean => |val| {
-                    const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val));
+                    const autoHashFn = std.array_hash_map.getAutoHashFn(@TypeOf(val));
                     return autoHashFn(val);
                 },
                 .number => |val| {
-                    const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val));
-                    return autoHashFn(val);
+                    const floatBits = @typeInfo(@TypeOf(val)).Float.bits;
+                    const hashType = std.meta.Int(.unsigned, floatBits);
+                    const autoHashFn = std.array_hash_map.getAutoHashFn(hashType);
+                    return autoHashFn(@bitCast(hashType, val));
                 },
                 .string, .table, .function, .userdata, .thread => |val| {
                     // TODO
@@ -111,7 +53,7 @@ pub const Table = struct {
                     return 0;
                 },
                 .light_userdata => |val| {
-                    const ptrHashFn = std.hash_map.getHashPtrAddrFn(@TypeOf(val));
+                    const ptrHashFn = std.array_hash_map.getHashPtrAddrFn(@TypeOf(val));
                     return ptrHashFn(val);
                 },
                 .nil => {
@@ -129,7 +71,7 @@ pub const Table = struct {
             }
 
             // TODO: type-specific eql
-            const autoEqlFn = std.hash_map.getAutoEqlFn(Value);
+            const autoEqlFn = std.array_hash_map.getAutoEqlFn(Value);
             return autoEqlFn(a, b);
         }
     };
@@ -157,7 +99,7 @@ pub const Table = struct {
         return self;
     }
 
-    pub fn deinit(self: Table) void {
+    pub fn deinit(self: *Table) void {
         self.array.deinit();
         self.map.deinit();
     }
@@ -214,7 +156,7 @@ pub const Table = struct {
             },
             else => {},
         }
-        const kv = self.map.get(key);
+        const kv = self.map.getEntry(key);
         return if (kv != null) &(kv.?.value) else null;
     }
 
@@ -289,8 +231,8 @@ pub const Table = struct {
         // need to check the map portion for any remaining contiguous keys now
         var last_contiguous_i: usize = j;
         j += 1;
-        while (self.map.get(Value{ .number = @intToFloat(f64, j) })) |kv| {
-            if (kv.value == .nil) {
+        while (self.map.get(Value{ .number = @intToFloat(f64, j) })) |value| {
+            if (value == .nil) {
                 break;
             }
             last_contiguous_i = j;
@@ -329,8 +271,8 @@ pub const Table = struct {
         }
         while (j - last_contiguous_i > 1) {
             var m: usize = (last_contiguous_i + j) / 2;
-            if (self.map.get(Value{ .number = @intToFloat(f64, m) })) |kv| {
-                if (kv.value != .nil) {
+            if (self.map.get(Value{ .number = @intToFloat(f64, m) })) |value| {
+                if (value != .nil) {
                     // if value is non-nil, then search values above
                     last_contiguous_i = m;
                     continue;
@@ -365,10 +307,11 @@ pub const Table = struct {
                 };
             }
         }
-        if (MapPortion.keyToIndex(&self.map, key)) |cur_map_i| {
+        if (self.map.getIndex(key)) |cur_map_i| {
             next_i = cur_map_i + 1;
-            var iterator = MapPortion.exhaustiveIterator(&self.map, next_i);
-            if (iterator.next()) |next_kv| {
+            const items = self.map.items();
+            if (items.len > next_i) {
+                const next_kv = items[next_i];
                 return Table.KV{
                     .key = next_kv.key,
                     .value = next_kv.value,
@@ -401,10 +344,10 @@ test "arrayIndex" {
 }
 
 test "init and initCapacity" {
-    const tbl = Table.init(std.testing.allocator);
+    var tbl = Table.init(std.testing.allocator);
     defer tbl.deinit();
 
-    const tblCapacity = try Table.initCapacity(std.testing.allocator, 5, 5);
+    var tblCapacity = try Table.initCapacity(std.testing.allocator, 5, 5);
     defer tblCapacity.deinit();
 }
 

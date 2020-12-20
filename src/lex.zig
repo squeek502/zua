@@ -20,11 +20,8 @@ const std = @import("std");
 // TODO: ?
 
 // Debug/test output
-const dumpTokensDuringTests = true;
+const dumpTokensDuringTests = false;
 const veryVerboseLexing = false;
-
-/// Lexer with default options, for convenience
-pub const DefaultLexer = Lexer(LexerOptions{});
 
 pub const Token = struct {
     id: Id,
@@ -180,7 +177,14 @@ pub const LexError = error{
     EscapeSequenceTooLarge,
 };
 
-pub const LexerOptions = struct {
+pub const LexerOptions = struct {};
+
+pub const Lexer = struct {
+    const Self = @This();
+
+    buffer: []const u8,
+    index: usize,
+
     /// In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
     /// since \0 is technically in the string literal passed to check_next representing
     /// the set of characters to check for (since the string is null-terminated)
@@ -200,545 +204,536 @@ pub const LexerOptions = struct {
     // TODO: implement or ignore this (options for handling nesting of [[]] in multiline strings)
     // for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
     long_str_nesting_compat: bool = false,
-};
 
-pub fn Lexer(comptime options: LexerOptions) type {
-    return struct {
-        const Self = @This();
-
-        buffer: []const u8,
-        index: usize,
-
-        pub fn init(buffer: []const u8) Self {
-            return Self{
-                .buffer = buffer,
-                .index = 0,
-            };
-        }
-
-        pub fn dump(self: *Self, token: *const Token) void {
-            std.debug.warn("{} {} \"{}\"\n", .{ @tagName(token.id), token.nameForDisplay(), self.buffer[token.start..token.end] });
-        }
-
-        const State = enum {
-            start,
-            identifier,
-            string_literal,
-            string_literal_backslash,
-            string_literal_backslash_line_endings,
-            dash,
-            dot,
-            concat,
-            comment_start,
-            short_comment,
-            long_comment_start,
-            long_comment,
-            long_comment_possible_end,
-            long_string_start,
-            long_string,
-            long_string_possible_end,
-            number,
-            number_exponent_start,
-            number_exponent,
-            number_hex_start,
-            number_hex,
-            compound_equal,
+    pub fn init(buffer: []const u8) Self {
+        return Self{
+            .buffer = buffer,
+            .index = 0,
         };
+    }
 
-        pub fn next(self: *Self) LexError!Token {
-            const start_index = self.index;
-            if (veryVerboseLexing) {
-                if (self.index < self.buffer.len) {
-                    std.debug.warn("{}:'{c}'", .{ self.index, self.buffer[self.index] });
-                } else {
-                    std.debug.warn("eof", .{});
-                }
-            }
-            var result = Token{
-                .id = Token.Id.eof,
-                .start = start_index,
-                .end = undefined,
-                .char = null,
-            };
-            var state = State.start;
-            var string_delim: u8 = undefined;
-            var string_level: usize = 0;
-            var expected_string_level: usize = 0;
-            var string_escape_n: std.math.IntFittingRange(0, 999) = 0;
-            var string_escape_i: std.math.IntFittingRange(0, 3) = 0;
-            var string_escape_line_ending: u8 = undefined;
-            var number_is_float: bool = false;
-            var number_starting_char: u8 = undefined;
-            var number_exponent_signed_char: ?u8 = null;
-            var number_is_null_terminated: bool = false;
-            while (self.index < self.buffer.len) : (self.index += 1) {
-                const c = self.buffer[self.index];
-                if (veryVerboseLexing) std.debug.warn(":{}", .{@tagName(state)});
-                switch (state) {
-                    State.start => switch (c) {
-                        '\n', '\r' => {
-                            result.start = self.index + 1;
-                        },
-                        // space, tab, vertical tab, form feed
-                        ' ', '\t', '\x0b', '\x0c' => {
-                            // skip whitespace
-                            result.start = self.index + 1;
-                        },
-                        '-' => {
-                            // this could be the start of a comment, a long comment, or a single -
-                            state = State.dash;
-                        },
-                        'a'...'z', 'A'...'Z', '_' => {
-                            state = State.identifier;
-                            result.id = Token.Id.name;
-                        },
-                        '0'...'9' => {
-                            state = State.number;
-                            number_starting_char = c;
-                            if (options.check_next_bug_compat) {
-                                number_is_null_terminated = false;
-                            }
-                        },
-                        '"', '\'' => {
-                            state = State.string_literal;
-                            string_delim = c;
-                            result.id = Token.Id.string;
-                        },
-                        '.' => {
-                            // this could be the start of .., ..., or a single .
-                            state = State.dot;
-                        },
-                        '>', '<', '~', '=' => {
-                            state = State.compound_equal;
-                        },
-                        '[' => {
-                            state = State.long_string_start;
-                            expected_string_level = 0;
-                        },
-                        else => {
-                            result.id = Token.Id.single_char;
-                            self.index += 1;
-                            break;
-                        },
-                    },
-                    State.identifier => switch (c) {
-                        'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
-                        else => {
-                            const name = self.buffer[result.start..self.index];
-                            if (Token.Keyword.idFromName(name)) |id| {
-                                result.id = id;
-                            }
-                            break;
-                        },
-                    },
-                    State.string_literal => switch (c) {
-                        '\\' => {
-                            state = State.string_literal_backslash;
-                            string_escape_i = 0;
-                            string_escape_n = 0;
-                        },
-                        '"', '\'' => {
-                            if (c == string_delim) {
-                                self.index += 1;
-                                break;
-                            }
-                        },
-                        '\n', '\r' => return LexError.UnfinishedString,
-                        else => {},
-                    },
-                    State.string_literal_backslash => switch (c) {
-                        '0'...'9' => {
-                            // Validate that any \ddd escape sequences can actually fit
-                            // in a byte
-                            string_escape_n = 10 * string_escape_n + (c - '0');
-                            string_escape_i += 1;
-                            if (string_escape_i == 3) {
-                                if (string_escape_n > std.math.maxInt(u8)) {
-                                    return LexError.EscapeSequenceTooLarge;
-                                }
-                                state = State.string_literal;
-                            }
-                        },
-                        '\r', '\n' => {
-                            if (string_escape_i > 0) {
-                                return LexError.UnfinishedString;
-                            }
-                            state = State.string_literal_backslash_line_endings;
-                            string_escape_line_ending = c;
-                        },
-                        else => {
-                            // if the escape sequence had any digits, then
-                            // we need to backtrack so as not to escape the current
-                            // character (since the digits are the things being escaped)
-                            if (string_escape_i > 0) {
-                                self.index -= 1;
-                            }
-                            state = State.string_literal;
-                        },
-                    },
-                    State.string_literal_backslash_line_endings => switch (c) {
-                        '\r', '\n' => {
-                            // can only escape \r\n or \n\r pairs, not \r\r or \n\n
-                            if (c == string_escape_line_ending) {
-                                return LexError.UnfinishedString;
-                            } else {
-                                state = State.string_literal;
-                            }
-                        },
-                        else => {
-                            // backtrack so that we don't escape the current char
-                            self.index -= 1;
-                            state = State.string_literal;
-                        },
-                    },
-                    State.dash => switch (c) {
-                        '-' => {
-                            state = State.comment_start;
-                        },
-                        else => {
-                            result.id = Token.Id.single_char;
-                            break;
-                        },
-                    },
-                    State.comment_start => switch (c) {
-                        '[' => {
-                            state = State.long_comment_start;
-                            expected_string_level = 0;
-                        },
-                        '\r', '\n' => {
-                            // comment immediately ends
-                            result.start = self.index + 1;
-                            state = State.start;
-                        },
-                        else => {
-                            state = State.short_comment;
-                        },
-                    },
-                    State.long_string_start,
-                    State.long_comment_start,
-                    => switch (c) {
-                        '=' => {
-                            expected_string_level += 1;
-                        },
-                        '[' => {
-                            state = if (state == State.long_comment_start) State.long_comment else State.long_string;
-                        },
-                        else => {
-                            if (state == State.long_comment_start) {
-                                if (c == '\n' or c == '\r') {
-                                    // not a long comment, but the short comment ends immediately
-                                    result.start = self.index + 1;
-                                    state = State.start;
-                                } else {
-                                    state = State.short_comment;
-                                }
-                            } else {
-                                // Lua makes the pattern [=X where X is anything but [ or = an explicit
-                                // 'invalid long string delimiter' error instead of discarding
-                                // its long-string-ness and parsing the tokens as normal
-                                //
-                                // - This is only true of long strings: long comments handle --[==X just fine
-                                //   since it falls back to -- (short comment)
-                                // - The end of long strings is unaffected: [=[str]=X does not give this error
-                                //   (instead the string will just not be finished)
-                                // - Long strings with no sep chars is unaffected: [X does not give this error
-                                //   (instead it will an give unexpected symbol error while parsing)
-                                if (expected_string_level > 0) {
-                                    return LexError.InvalidLongStringDelimiter;
-                                } else {
-                                    result.id = Token.Id.single_char;
-                                    break;
-                                }
-                            }
-                        },
-                    },
-                    State.long_string,
-                    State.long_comment,
-                    => switch (c) {
-                        ']' => {
-                            state = if (state == State.long_comment) State.long_comment_possible_end else State.long_string_possible_end;
-                            string_level = 0;
-                        },
-                        else => {},
-                    },
-                    State.long_string_possible_end,
-                    State.long_comment_possible_end,
-                    => switch (c) {
-                        ']' => {
-                            if (string_level == expected_string_level) {
-                                if (state == State.long_comment_possible_end) {
-                                    result.start = self.index + 1;
-                                    state = State.start;
-                                } else {
-                                    self.index += 1;
-                                    result.id = Token.Id.string;
-                                    break;
-                                }
-                            } else {
-                                state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
-                            }
-                        },
-                        '=' => {
-                            string_level += 1;
-                        },
-                        else => {
-                            state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
-                        },
-                    },
-                    State.short_comment => switch (c) {
-                        '\n', '\r' => {
-                            result.start = self.index + 1;
-                            state = State.start;
-                        },
-                        else => {},
-                    },
-                    State.dot => switch (c) {
-                        '.' => {
-                            state = State.concat;
-                        },
-                        '0'...'9' => {
-                            state = State.number;
-                            number_starting_char = '.';
-                            number_is_float = true;
-                            if (options.check_next_bug_compat) {
-                                number_is_null_terminated = false;
-                            }
-                        },
-                        else => {
-                            if (options.check_next_bug_compat and c == '\x00') {
-                                state = State.concat;
-                            } else {
-                                result.id = Token.Id.single_char;
-                                break;
-                            }
-                        },
-                    },
-                    State.concat => switch (c) {
-                        '.' => {
-                            result.id = Token.Id.ellipsis;
-                            // include this .
-                            self.index += 1;
-                            break;
-                        },
-                        else => {
-                            if (options.check_next_bug_compat and c == '\x00') {
-                                result.id = Token.Id.ellipsis;
-                                // include this .
-                                self.index += 1;
-                                break;
-                            } else {
-                                result.id = Token.Id.concat;
-                                break;
-                            }
-                        },
-                    },
-                    State.number => switch (c) {
-                        '0'...'9' => {},
-                        '.' => {
-                            // multiple decimal points not allowed
-                            if (number_is_float) {
-                                return LexError.MalformedNumber;
-                            }
-                            number_is_float = true;
-                        },
-                        'x', 'X' => {
-                            // only 0x is allowed
-                            if (number_starting_char != '0') {
-                                return LexError.MalformedNumber;
-                            }
-                            state = State.number_hex_start;
-                        },
-                        'e', 'E' => {
-                            state = State.number_exponent_start;
-                            number_exponent_signed_char = null;
-                        },
-                        // 'a'...'z' minus e and x
-                        'a'...'d', 'A'...'D', 'f'...'w', 'F'...'W', 'y'...'z', 'Y'...'Z' => {
-                            return LexError.MalformedNumber;
-                        },
-                        '_' => return LexError.MalformedNumber,
-                        else => {
-                            if (options.check_next_bug_compat and c == '\x00') {
-                                state = State.number_exponent_start;
-                                number_exponent_signed_char = null;
-                                number_is_null_terminated = true;
-                            } else {
-                                result.id = Token.Id.number;
-                                break;
-                            }
-                        },
-                    },
-                    State.number_hex_start, State.number_hex => switch (c) {
-                        '0'...'9', 'a'...'f', 'A'...'F' => {
-                            state = State.number_hex;
-                        },
-                        'g'...'z', 'G'...'Z' => {
-                            return LexError.MalformedNumber;
-                        },
-                        '_' => return LexError.MalformedNumber,
-                        else => {
-                            result.id = Token.Id.number;
-                            break;
-                        },
-                    },
-                    State.number_exponent_start => {
-                        const should_consume_anything = options.check_next_bug_compat and number_is_null_terminated;
-                        if (should_consume_anything) {
-                            switch (c) {
-                                '\x00', '-', '+', '0'...'9', 'a'...'z', 'A'...'Z', '_' => {
-                                    state = State.number_exponent;
-                                },
-                                else => {
-                                    result.id = Token.Id.number;
-                                    break;
-                                },
-                            }
-                        } else {
-                            switch (c) {
-                                '0'...'9' => state = State.number_exponent,
-                                '-', '+' => {
-                                    if (number_exponent_signed_char) |_| {
-                                        // this is an error because e.g. "1e--" would lex as "1e-" and "-"
-                                        // and "1e-" is always invalid
-                                        return LexError.MalformedNumber;
-                                    }
-                                    number_exponent_signed_char = c;
-                                },
-                                else => {
-                                    // if we get here, then the token up to this point has to be
-                                    // either 1e, 1e-, 1e+ which *must* be followed by a digit, and
-                                    // we already know c is not a digit
-                                    return LexError.MalformedNumber;
-                                },
-                            }
-                        }
-                    },
-                    State.number_exponent => {
-                        const should_consume_anything = options.check_next_bug_compat and number_is_null_terminated;
-                        if (should_consume_anything) {
-                            switch (c) {
-                                '0'...'9', 'a'...'z', 'A'...'Z', '_' => {},
-                                else => {
-                                    result.id = Token.Id.number;
-                                    break;
-                                },
-                            }
-                        } else {
-                            switch (c) {
-                                '0'...'9' => {},
-                                'a'...'z', 'A'...'Z', '_' => return LexError.MalformedNumber,
-                                else => {
-                                    result.id = Token.Id.number;
-                                    break;
-                                },
-                            }
-                        }
-                    },
-                    State.compound_equal => switch (c) {
-                        '=' => {
-                            switch (self.buffer[self.index - 1]) {
-                                '>' => result.id = Token.Id.ge,
-                                '<' => result.id = Token.Id.le,
-                                '~' => result.id = Token.Id.ne,
-                                '=' => result.id = Token.Id.eq,
-                                else => unreachable,
-                            }
-                            self.index += 1;
-                            break;
-                        },
-                        else => {
-                            result.id = Token.Id.single_char;
-                            break;
-                        },
-                    },
-                }
+    pub fn dump(self: *Self, token: *const Token) void {
+        std.debug.warn("{} {} \"{}\"\n", .{ @tagName(token.id), token.nameForDisplay(), self.buffer[token.start..token.end] });
+    }
+
+    const State = enum {
+        start,
+        identifier,
+        string_literal,
+        string_literal_backslash,
+        string_literal_backslash_line_endings,
+        dash,
+        dot,
+        concat,
+        comment_start,
+        short_comment,
+        long_comment_start,
+        long_comment,
+        long_comment_possible_end,
+        long_string_start,
+        long_string,
+        long_string_possible_end,
+        number,
+        number_exponent_start,
+        number_exponent,
+        number_hex_start,
+        number_hex,
+        compound_equal,
+    };
+
+    pub fn next(self: *Self) LexError!Token {
+        const start_index = self.index;
+        if (veryVerboseLexing) {
+            if (self.index < self.buffer.len) {
+                std.debug.warn("{}:'{c}'", .{ self.index, self.buffer[self.index] });
             } else {
-                // this will always be true due to the while loop condition
-                // as the else block is only evaluated after a break; in the while loop
-                std.debug.assert(self.index == self.buffer.len);
-                switch (state) {
-                    State.start => {},
-                    State.identifier => {
+                std.debug.warn("eof", .{});
+            }
+        }
+        var result = Token{
+            .id = Token.Id.eof,
+            .start = start_index,
+            .end = undefined,
+            .char = null,
+        };
+        var state = State.start;
+        var string_delim: u8 = undefined;
+        var string_level: usize = 0;
+        var expected_string_level: usize = 0;
+        var string_escape_n: std.math.IntFittingRange(0, 999) = 0;
+        var string_escape_i: std.math.IntFittingRange(0, 3) = 0;
+        var string_escape_line_ending: u8 = undefined;
+        var number_is_float: bool = false;
+        var number_starting_char: u8 = undefined;
+        var number_exponent_signed_char: ?u8 = null;
+        var number_is_null_terminated: bool = false;
+        while (self.index < self.buffer.len) : (self.index += 1) {
+            const c = self.buffer[self.index];
+            if (veryVerboseLexing) std.debug.warn(":{}", .{@tagName(state)});
+            switch (state) {
+                State.start => switch (c) {
+                    '\n', '\r' => {
+                        result.start = self.index + 1;
+                    },
+                    // space, tab, vertical tab, form feed
+                    ' ', '\t', '\x0b', '\x0c' => {
+                        // skip whitespace
+                        result.start = self.index + 1;
+                    },
+                    '-' => {
+                        // this could be the start of a comment, a long comment, or a single -
+                        state = State.dash;
+                    },
+                    'a'...'z', 'A'...'Z', '_' => {
+                        state = State.identifier;
+                        result.id = Token.Id.name;
+                    },
+                    '0'...'9' => {
+                        state = State.number;
+                        number_starting_char = c;
+                        if (self.check_next_bug_compat) {
+                            number_is_null_terminated = false;
+                        }
+                    },
+                    '"', '\'' => {
+                        state = State.string_literal;
+                        string_delim = c;
+                        result.id = Token.Id.string;
+                    },
+                    '.' => {
+                        // this could be the start of .., ..., or a single .
+                        state = State.dot;
+                    },
+                    '>', '<', '~', '=' => {
+                        state = State.compound_equal;
+                    },
+                    '[' => {
+                        state = State.long_string_start;
+                        expected_string_level = 0;
+                    },
+                    else => {
+                        result.id = Token.Id.single_char;
+                        self.index += 1;
+                        break;
+                    },
+                },
+                State.identifier => switch (c) {
+                    'a'...'z', 'A'...'Z', '_', '0'...'9' => {},
+                    else => {
                         const name = self.buffer[result.start..self.index];
                         if (Token.Keyword.idFromName(name)) |id| {
                             result.id = id;
                         }
+                        break;
                     },
-                    State.dot,
-                    State.dash,
-                    State.compound_equal,
-                    => {
+                },
+                State.string_literal => switch (c) {
+                    '\\' => {
+                        state = State.string_literal_backslash;
+                        string_escape_i = 0;
+                        string_escape_n = 0;
+                    },
+                    '"', '\'' => {
+                        if (c == string_delim) {
+                            self.index += 1;
+                            break;
+                        }
+                    },
+                    '\n', '\r' => return LexError.UnfinishedString,
+                    else => {},
+                },
+                State.string_literal_backslash => switch (c) {
+                    '0'...'9' => {
+                        // Validate that any \ddd escape sequences can actually fit
+                        // in a byte
+                        string_escape_n = 10 * string_escape_n + (c - '0');
+                        string_escape_i += 1;
+                        if (string_escape_i == 3) {
+                            if (string_escape_n > std.math.maxInt(u8)) {
+                                return LexError.EscapeSequenceTooLarge;
+                            }
+                            state = State.string_literal;
+                        }
+                    },
+                    '\r', '\n' => {
+                        if (string_escape_i > 0) {
+                            return LexError.UnfinishedString;
+                        }
+                        state = State.string_literal_backslash_line_endings;
+                        string_escape_line_ending = c;
+                    },
+                    else => {
+                        // if the escape sequence had any digits, then
+                        // we need to backtrack so as not to escape the current
+                        // character (since the digits are the things being escaped)
+                        if (string_escape_i > 0) {
+                            self.index -= 1;
+                        }
+                        state = State.string_literal;
+                    },
+                },
+                State.string_literal_backslash_line_endings => switch (c) {
+                    '\r', '\n' => {
+                        // can only escape \r\n or \n\r pairs, not \r\r or \n\n
+                        if (c == string_escape_line_ending) {
+                            return LexError.UnfinishedString;
+                        } else {
+                            state = State.string_literal;
+                        }
+                    },
+                    else => {
+                        // backtrack so that we don't escape the current char
+                        self.index -= 1;
+                        state = State.string_literal;
+                    },
+                },
+                State.dash => switch (c) {
+                    '-' => {
+                        state = State.comment_start;
+                    },
+                    else => {
                         result.id = Token.Id.single_char;
+                        break;
                     },
-                    State.concat => {
-                        result.id = Token.Id.concat;
+                },
+                State.comment_start => switch (c) {
+                    '[' => {
+                        state = State.long_comment_start;
+                        expected_string_level = 0;
                     },
-                    State.number_exponent,
-                    State.number_hex,
-                    State.number,
-                    => {
-                        result.id = Token.Id.number;
+                    '\r', '\n' => {
+                        // comment immediately ends
+                        result.start = self.index + 1;
+                        state = State.start;
                     },
-                    State.comment_start,
-                    State.short_comment,
-                    State.long_comment_start,
-                    => {
-                        result.start = self.index;
+                    else => {
+                        state = State.short_comment;
                     },
-                    State.long_string_start => {
-                        if (expected_string_level > 0) {
-                            return LexError.InvalidLongStringDelimiter;
+                },
+                State.long_string_start,
+                State.long_comment_start,
+                => switch (c) {
+                    '=' => {
+                        expected_string_level += 1;
+                    },
+                    '[' => {
+                        state = if (state == State.long_comment_start) State.long_comment else State.long_string;
+                    },
+                    else => {
+                        if (state == State.long_comment_start) {
+                            if (c == '\n' or c == '\r') {
+                                // not a long comment, but the short comment ends immediately
+                                result.start = self.index + 1;
+                                state = State.start;
+                            } else {
+                                state = State.short_comment;
+                            }
+                        } else {
+                            // Lua makes the pattern [=X where X is anything but [ or = an explicit
+                            // 'invalid long string delimiter' error instead of discarding
+                            // its long-string-ness and parsing the tokens as normal
+                            //
+                            // - This is only true of long strings: long comments handle --[==X just fine
+                            //   since it falls back to -- (short comment)
+                            // - The end of long strings is unaffected: [=[str]=X does not give this error
+                            //   (instead the string will just not be finished)
+                            // - Long strings with no sep chars is unaffected: [X does not give this error
+                            //   (instead it will an give unexpected symbol error while parsing)
+                            if (expected_string_level > 0) {
+                                return LexError.InvalidLongStringDelimiter;
+                            } else {
+                                result.id = Token.Id.single_char;
+                                break;
+                            }
+                        }
+                    },
+                },
+                State.long_string,
+                State.long_comment,
+                => switch (c) {
+                    ']' => {
+                        state = if (state == State.long_comment) State.long_comment_possible_end else State.long_string_possible_end;
+                        string_level = 0;
+                    },
+                    else => {},
+                },
+                State.long_string_possible_end,
+                State.long_comment_possible_end,
+                => switch (c) {
+                    ']' => {
+                        if (string_level == expected_string_level) {
+                            if (state == State.long_comment_possible_end) {
+                                result.start = self.index + 1;
+                                state = State.start;
+                            } else {
+                                self.index += 1;
+                                result.id = Token.Id.string;
+                                break;
+                            }
+                        } else {
+                            state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
+                        }
+                    },
+                    '=' => {
+                        string_level += 1;
+                    },
+                    else => {
+                        state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
+                    },
+                },
+                State.short_comment => switch (c) {
+                    '\n', '\r' => {
+                        result.start = self.index + 1;
+                        state = State.start;
+                    },
+                    else => {},
+                },
+                State.dot => switch (c) {
+                    '.' => {
+                        state = State.concat;
+                    },
+                    '0'...'9' => {
+                        state = State.number;
+                        number_starting_char = '.';
+                        number_is_float = true;
+                        if (self.check_next_bug_compat) {
+                            number_is_null_terminated = false;
+                        }
+                    },
+                    else => {
+                        if (self.check_next_bug_compat and c == '\x00') {
+                            state = State.concat;
                         } else {
                             result.id = Token.Id.single_char;
+                            break;
                         }
                     },
-                    State.long_comment_possible_end,
-                    State.long_comment,
-                    => return LexError.UnfinishedLongComment,
-                    State.long_string_possible_end,
-                    State.long_string,
-                    => return LexError.UnfinishedLongString,
-                    State.string_literal,
-                    State.string_literal_backslash,
-                    State.string_literal_backslash_line_endings,
-                    => return LexError.UnfinishedString,
-                    State.number_hex_start,
-                    State.number_exponent_start,
-                    => {
-                        if (options.check_next_bug_compat and number_is_null_terminated) {
-                            result.id = Token.Id.number;
+                },
+                State.concat => switch (c) {
+                    '.' => {
+                        result.id = Token.Id.ellipsis;
+                        // include this .
+                        self.index += 1;
+                        break;
+                    },
+                    else => {
+                        if (self.check_next_bug_compat and c == '\x00') {
+                            result.id = Token.Id.ellipsis;
+                            // include this .
+                            self.index += 1;
+                            break;
                         } else {
+                            result.id = Token.Id.concat;
+                            break;
+                        }
+                    },
+                },
+                State.number => switch (c) {
+                    '0'...'9' => {},
+                    '.' => {
+                        // multiple decimal points not allowed
+                        if (number_is_float) {
                             return LexError.MalformedNumber;
                         }
+                        number_is_float = true;
                     },
-                }
+                    'x', 'X' => {
+                        // only 0x is allowed
+                        if (number_starting_char != '0') {
+                            return LexError.MalformedNumber;
+                        }
+                        state = State.number_hex_start;
+                    },
+                    'e', 'E' => {
+                        state = State.number_exponent_start;
+                        number_exponent_signed_char = null;
+                    },
+                    // 'a'...'z' minus e and x
+                    'a'...'d', 'A'...'D', 'f'...'w', 'F'...'W', 'y'...'z', 'Y'...'Z' => {
+                        return LexError.MalformedNumber;
+                    },
+                    '_' => return LexError.MalformedNumber,
+                    else => {
+                        if (self.check_next_bug_compat and c == '\x00') {
+                            state = State.number_exponent_start;
+                            number_exponent_signed_char = null;
+                            number_is_null_terminated = true;
+                        } else {
+                            result.id = Token.Id.number;
+                            break;
+                        }
+                    },
+                },
+                State.number_hex_start, State.number_hex => switch (c) {
+                    '0'...'9', 'a'...'f', 'A'...'F' => {
+                        state = State.number_hex;
+                    },
+                    'g'...'z', 'G'...'Z' => {
+                        return LexError.MalformedNumber;
+                    },
+                    '_' => return LexError.MalformedNumber,
+                    else => {
+                        result.id = Token.Id.number;
+                        break;
+                    },
+                },
+                State.number_exponent_start => {
+                    const should_consume_anything = self.check_next_bug_compat and number_is_null_terminated;
+                    if (should_consume_anything) {
+                        switch (c) {
+                            '\x00', '-', '+', '0'...'9', 'a'...'z', 'A'...'Z', '_' => {
+                                state = State.number_exponent;
+                            },
+                            else => {
+                                result.id = Token.Id.number;
+                                break;
+                            },
+                        }
+                    } else {
+                        switch (c) {
+                            '0'...'9' => state = State.number_exponent,
+                            '-', '+' => {
+                                if (number_exponent_signed_char) |_| {
+                                    // this is an error because e.g. "1e--" would lex as "1e-" and "-"
+                                    // and "1e-" is always invalid
+                                    return LexError.MalformedNumber;
+                                }
+                                number_exponent_signed_char = c;
+                            },
+                            else => {
+                                // if we get here, then the token up to this point has to be
+                                // either 1e, 1e-, 1e+ which *must* be followed by a digit, and
+                                // we already know c is not a digit
+                                return LexError.MalformedNumber;
+                            },
+                        }
+                    }
+                },
+                State.number_exponent => {
+                    const should_consume_anything = self.check_next_bug_compat and number_is_null_terminated;
+                    if (should_consume_anything) {
+                        switch (c) {
+                            '0'...'9', 'a'...'z', 'A'...'Z', '_' => {},
+                            else => {
+                                result.id = Token.Id.number;
+                                break;
+                            },
+                        }
+                    } else {
+                        switch (c) {
+                            '0'...'9' => {},
+                            'a'...'z', 'A'...'Z', '_' => return LexError.MalformedNumber,
+                            else => {
+                                result.id = Token.Id.number;
+                                break;
+                            },
+                        }
+                    }
+                },
+                State.compound_equal => switch (c) {
+                    '=' => {
+                        switch (self.buffer[self.index - 1]) {
+                            '>' => result.id = Token.Id.ge,
+                            '<' => result.id = Token.Id.le,
+                            '~' => result.id = Token.Id.ne,
+                            '=' => result.id = Token.Id.eq,
+                            else => unreachable,
+                        }
+                        self.index += 1;
+                        break;
+                    },
+                    else => {
+                        result.id = Token.Id.single_char;
+                        break;
+                    },
+                },
             }
-
-            if (veryVerboseLexing) {
-                if (self.index < self.buffer.len) {
-                    std.debug.warn(":{}:'{c}'=\"{}\"\n", .{ self.index, self.buffer[self.index], self.buffer[result.start..self.index] });
-                } else {
-                    std.debug.warn(":eof=\"{}\"\n", .{self.buffer[result.start..self.index]});
-                }
+        } else {
+            // this will always be true due to the while loop condition
+            // as the else block is only evaluated after a break; in the while loop
+            std.debug.assert(self.index == self.buffer.len);
+            switch (state) {
+                State.start => {},
+                State.identifier => {
+                    const name = self.buffer[result.start..self.index];
+                    if (Token.Keyword.idFromName(name)) |id| {
+                        result.id = id;
+                    }
+                },
+                State.dot,
+                State.dash,
+                State.compound_equal,
+                => {
+                    result.id = Token.Id.single_char;
+                },
+                State.concat => {
+                    result.id = Token.Id.concat;
+                },
+                State.number_exponent,
+                State.number_hex,
+                State.number,
+                => {
+                    result.id = Token.Id.number;
+                },
+                State.comment_start,
+                State.short_comment,
+                State.long_comment_start,
+                => {
+                    result.start = self.index;
+                },
+                State.long_string_start => {
+                    if (expected_string_level > 0) {
+                        return LexError.InvalidLongStringDelimiter;
+                    } else {
+                        result.id = Token.Id.single_char;
+                    }
+                },
+                State.long_comment_possible_end,
+                State.long_comment,
+                => return LexError.UnfinishedLongComment,
+                State.long_string_possible_end,
+                State.long_string,
+                => return LexError.UnfinishedLongString,
+                State.string_literal,
+                State.string_literal_backslash,
+                State.string_literal_backslash_line_endings,
+                => return LexError.UnfinishedString,
+                State.number_hex_start,
+                State.number_exponent_start,
+                => {
+                    if (self.check_next_bug_compat and number_is_null_terminated) {
+                        result.id = Token.Id.number;
+                    } else {
+                        return LexError.MalformedNumber;
+                    }
+                },
             }
-
-            if (result.id == Token.Id.single_char) {
-                result.char = self.buffer[result.start];
-            }
-
-            result.end = self.index;
-            return result;
         }
 
-        pub fn lookahead(self: *Self) Token {
-            const lookaheadLexer = Lexer{
-                .buffer = self.buffer,
-                .index = self.index,
-            };
-            return lookaheadLexer.next();
+        if (veryVerboseLexing) {
+            if (self.index < self.buffer.len) {
+                std.debug.warn(":{}:'{c}'=\"{}\"\n", .{ self.index, self.buffer[self.index], self.buffer[result.start..self.index] });
+            } else {
+                std.debug.warn(":eof=\"{}\"\n", .{self.buffer[result.start..self.index]});
+            }
         }
-    };
-}
+
+        if (result.id == Token.Id.single_char) {
+            result.char = self.buffer[result.start];
+        }
+
+        result.end = self.index;
+        return result;
+    }
+
+    pub fn lookahead(self: *Self) Token {
+        const lookaheadLexer = Lexer{
+            .buffer = self.buffer,
+            .index = self.index,
+        };
+        return lookaheadLexer.next();
+    }
+};
 
 test "hello \"world\"" {
     try testLex("local hello = \"wor\\\"ld\"", &[_]Token.Id{
@@ -939,40 +934,36 @@ test "LexError.UnfinishedString" {
 }
 
 test "5.1 check_next bug compat on" {
-    const CheckNextCompatLexer = Lexer(LexerOptions{ .check_next_bug_compat = true });
-
-    try testLexType(CheckNextCompatLexer, ".\x00", &[_]Token.Id{Token.Id.concat});
-    try testLexType(CheckNextCompatLexer, ".\x00\x00", &[_]Token.Id{Token.Id.ellipsis});
-    try testLexType(CheckNextCompatLexer, "..\x00", &[_]Token.Id{Token.Id.ellipsis});
-    try testLexType(CheckNextCompatLexer, "1\x00", &[_]Token.Id{Token.Id.number});
-    try testLexType(CheckNextCompatLexer, "1\x00-5", &[_]Token.Id{Token.Id.number});
-    try testLexType(CheckNextCompatLexer, "1\x00\x005", &[_]Token.Id{Token.Id.number});
-    try testLexType(CheckNextCompatLexer, "1\x00\x00anythingcangoherenow", &[_]Token.Id{Token.Id.number});
-    try testLexType(CheckNextCompatLexer, ".0\x00", &[_]Token.Id{Token.Id.number});
-    try testLexType(CheckNextCompatLexer, ".0\x00)", &[_]Token.Id{ Token.Id.number, Token.Id.single_char });
+    try testLexCheckNextBugCompat(".\x00", &[_]Token.Id{Token.Id.concat});
+    try testLexCheckNextBugCompat(".\x00\x00", &[_]Token.Id{Token.Id.ellipsis});
+    try testLexCheckNextBugCompat("..\x00", &[_]Token.Id{Token.Id.ellipsis});
+    try testLexCheckNextBugCompat("1\x00", &[_]Token.Id{Token.Id.number});
+    try testLexCheckNextBugCompat("1\x00-5", &[_]Token.Id{Token.Id.number});
+    try testLexCheckNextBugCompat("1\x00\x005", &[_]Token.Id{Token.Id.number});
+    try testLexCheckNextBugCompat("1\x00\x00anythingcangoherenow", &[_]Token.Id{Token.Id.number});
+    try testLexCheckNextBugCompat(".0\x00", &[_]Token.Id{Token.Id.number});
+    try testLexCheckNextBugCompat(".0\x00)", &[_]Token.Id{ Token.Id.number, Token.Id.single_char });
     // should lex as: 5\x00z5 ; \x00 ; 9\x00\x00 ; \x00
-    try testLexType(CheckNextCompatLexer, "5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
+    try testLexCheckNextBugCompat("5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
         Token.Id.number,
         Token.Id.single_char,
         Token.Id.number,
         Token.Id.single_char,
     });
-    try testLexType(CheckNextCompatLexer, "5\x00--z5", &[_]Token.Id{
+    try testLexCheckNextBugCompat("5\x00--z5", &[_]Token.Id{
         Token.Id.number,
         Token.Id.single_char,
         Token.Id.name,
     });
-    expectLexError(LexError.MalformedNumber, testLexType(CheckNextCompatLexer, "1e\x005", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLexCheckNextBugCompat("1e\x005", &[_]Token.Id{Token.Id.number}));
 }
 
 test "5.1 check_next bug compat off" {
-    const NoCheckNextCompatLexer = Lexer(LexerOptions{ .check_next_bug_compat = false });
-
-    try testLexType(NoCheckNextCompatLexer, ".\x00", &[_]Token.Id{ Token.Id.single_char, Token.Id.single_char });
-    try testLexType(NoCheckNextCompatLexer, "1\x00", &[_]Token.Id{ Token.Id.number, Token.Id.single_char });
-    try testLexType(NoCheckNextCompatLexer, "1\x00-5", &[_]Token.Id{ Token.Id.number, Token.Id.single_char, Token.Id.single_char, Token.Id.number });
+    try testLexNoCheckNextBugCompat(".\x00", &[_]Token.Id{ Token.Id.single_char, Token.Id.single_char });
+    try testLexNoCheckNextBugCompat("1\x00", &[_]Token.Id{ Token.Id.number, Token.Id.single_char });
+    try testLexNoCheckNextBugCompat("1\x00-5", &[_]Token.Id{ Token.Id.number, Token.Id.single_char, Token.Id.single_char, Token.Id.number });
     // should lex as: 5 ; \x00 ; z5 ; \x00 ; 9 ; \x00 ; \x00 ; \x00
-    try testLexType(NoCheckNextCompatLexer, "5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
+    try testLexNoCheckNextBugCompat("5\x00z5\x009\x00\x00\x00", &[_]Token.Id{
         Token.Id.number,
         Token.Id.single_char,
         Token.Id.name,
@@ -982,7 +973,7 @@ test "5.1 check_next bug compat off" {
         Token.Id.single_char,
         Token.Id.single_char,
     });
-    expectLexError(LexError.MalformedNumber, testLexType(NoCheckNextCompatLexer, "1e\x005", &[_]Token.Id{Token.Id.number}));
+    expectLexError(LexError.MalformedNumber, testLexNoCheckNextBugCompat("1e\x005", &[_]Token.Id{Token.Id.number}));
 }
 
 fn expectLexError(expected: LexError, actual: anytype) void {
@@ -992,12 +983,24 @@ fn expectLexError(expected: LexError, actual: anytype) void {
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
-    return testLexType(DefaultLexer, source, expected_tokens);
+    var lexer = Lexer.init(source);
+    return testLexInitialized(&lexer, expected_tokens);
 }
 
-fn testLexType(comptime lexer_type: type, source: []const u8, expected_tokens: []const Token.Id) !void {
-    var lexer = lexer_type.init(source);
-    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{source});
+fn testLexCheckNextBugCompat(source: []const u8, expected_tokens: []const Token.Id) !void {
+    var lexer = Lexer.init(source);
+    lexer.check_next_bug_compat = true;
+    return testLexInitialized(&lexer, expected_tokens);
+}
+
+fn testLexNoCheckNextBugCompat(source: []const u8, expected_tokens: []const Token.Id) !void {
+    var lexer = Lexer.init(source);
+    lexer.check_next_bug_compat = false;
+    return testLexInitialized(&lexer, expected_tokens);
+}
+
+fn testLexInitialized(lexer: *Lexer, expected_tokens: []const Token.Id) !void {
+    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{lexer.buffer});
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);

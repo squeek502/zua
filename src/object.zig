@@ -21,6 +21,22 @@ pub const Type = enum {
             else => return false,
         }
     }
+
+    /// ID to be used when reading/writing Lua bytecode
+    pub fn bytecodeId(self: Type) u8 {
+        return switch (self) {
+            .none => unreachable, // none is not serializable
+            .nil => 0,
+            .boolean => 1,
+            .light_userdata => 2,
+            .number => 3,
+            .string => 4,
+            .table => 5,
+            .function => 6,
+            .userdata => 7,
+            .thread => 8,
+        };
+    }
 };
 
 pub const GCObject = struct {};

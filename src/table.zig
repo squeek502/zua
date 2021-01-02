@@ -111,6 +111,7 @@ pub const Table = struct {
             return error.InvalidArrayKey;
         }
         const float_val = key.number;
+        // TODO: better handling of float vals that can't be converted to usize (out of range, negative, etc)
         const int_val = @floatToInt(usize, float_val);
         // must be positive and the float and int version of the key must be the same
         if (int_val < 0 or @intToFloat(f64, int_val) != float_val) {

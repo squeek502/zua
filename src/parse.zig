@@ -85,7 +85,7 @@ pub const Parser = struct {
             },
             .keyword_return => return self.retstat(),
             .keyword_while => return self.whilestat(),
-            .keyword_do,
+            .keyword_do => return self.dostat(),
             .keyword_for,
             .keyword_repeat,
             .keyword_function,
@@ -151,6 +151,25 @@ pub const Parser = struct {
             .body = try self.arena.dupe(*Node, body.items),
         };
         return &while_statement.base;
+    }
+
+    fn dostat(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_do);
+        self.token = try self.lexer.next();
+
+        var body = std.ArrayList(*Node).init(self.allocator);
+        defer body.deinit();
+
+        try self.block(&body);
+
+        std.debug.assert(self.token.id == .keyword_end); // TODO: check_match
+        self.token = try self.lexer.next();
+
+        const node = try self.arena.create(Node.DoStatement);
+        node.* = .{
+            .body = try self.arena.dupe(*Node, body.items),
+        };
+        return &node.base;
     }
 
     /// sort of the equivalent of Lua's test_then_block in lparser.c but handles else too
@@ -668,6 +687,17 @@ test "while statements" {
         \\ while_statement
         \\  identifier
         \\ do
+        \\  call
+        \\   identifier
+        \\   ()
+        \\
+    );
+}
+
+test "do statements" {
+    try testParse("do b() end",
+        \\chunk
+        \\ do_statement
         \\  call
         \\   identifier
         \\   ()

@@ -35,6 +35,7 @@ pub const Node = struct {
         if_clause,
         return_statement,
         while_statement,
+        do_statement,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -49,6 +50,7 @@ pub const Node = struct {
                 .if_clause => IfClause,
                 .return_statement => ReturnStatement,
                 .while_statement => WhileStatement,
+                .do_statement => DoStatement,
             };
         }
     };
@@ -121,6 +123,11 @@ pub const Node = struct {
     pub const WhileStatement = struct {
         base: Node = .{ .id = .while_statement },
         condition: *Node,
+        body: []*Node,
+    };
+
+    pub const DoStatement = struct {
+        base: Node = .{ .id = .do_statement },
         body: []*Node,
     };
 
@@ -227,6 +234,13 @@ pub const Node = struct {
                 try writer.writeByteNTimes(' ', indent);
                 try writer.writeAll("do\n");
                 for (while_statement.body) |body_node| {
+                    try body_node.dump(writer, indent + 1);
+                }
+            },
+            .do_statement => {
+                const do_statement = @fieldParentPtr(Node.DoStatement, "base", node);
+                try writer.writeAll("\n");
+                for (do_statement.body) |body_node| {
                     try body_node.dump(writer, indent + 1);
                 }
             },

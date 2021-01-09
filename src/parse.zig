@@ -87,9 +87,9 @@ pub const Parser = struct {
             .keyword_while => return self.whilestat(),
             .keyword_do => return self.dostat(),
             .keyword_repeat => return self.repeatstat(),
+            .keyword_break => return self.breakstat(),
             .keyword_for,
             .keyword_function,
-            .keyword_break,
             => unreachable,
             else => return self.exprstat(),
         }
@@ -151,6 +151,18 @@ pub const Parser = struct {
             .body = try self.arena.dupe(*Node, body.items),
         };
         return &while_statement.base;
+    }
+
+    fn breakstat(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_break);
+        const break_token = self.token;
+        self.token = try self.lexer.next();
+
+        var break_statement = try self.arena.create(Node.BreakStatement);
+        break_statement.* = .{
+            .token = break_token,
+        };
+        return &break_statement.base;
     }
 
     fn dostat(self: *Self) Error!*Node {
@@ -739,6 +751,14 @@ test "repeat statements" {
         \\   ()
         \\ until
         \\  identifier
+        \\
+    );
+}
+
+test "break statements" {
+    try testParse("break",
+        \\chunk
+        \\ break_statement
         \\
     );
 }

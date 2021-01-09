@@ -37,6 +37,7 @@ pub const Node = struct {
         while_statement,
         do_statement,
         repeat_statement,
+        break_statement,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -53,6 +54,7 @@ pub const Node = struct {
                 .while_statement => WhileStatement,
                 .do_statement => DoStatement,
                 .repeat_statement => RepeatStatement,
+                .break_statement => BreakStatement,
             };
         }
     };
@@ -137,6 +139,11 @@ pub const Node = struct {
         base: Node = .{ .id = .repeat_statement },
         body: []*Node,
         condition: *Node,
+    };
+
+    pub const BreakStatement = struct {
+        base: Node = .{ .id = .break_statement },
+        token: Token,
     };
 
     pub fn dump(
@@ -261,6 +268,9 @@ pub const Node = struct {
                 try writer.writeByteNTimes(' ', indent);
                 try writer.writeAll("until\n");
                 try repeat_statement.condition.dump(writer, indent + 1);
+            },
+            .break_statement => {
+                try writer.writeAll("\n");
             },
         }
     }

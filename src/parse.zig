@@ -83,12 +83,12 @@ pub const Parser = struct {
                     return self.localstat();
                 }
             },
+            .keyword_return => return self.retstat(),
             .keyword_while,
             .keyword_do,
             .keyword_for,
             .keyword_repeat,
             .keyword_function,
-            .keyword_return,
             .keyword_break,
             => unreachable,
             else => return self.exprstat(),
@@ -100,6 +100,26 @@ pub const Parser = struct {
             try list.append(try self.statement());
             _ = try self.testcharnext(';');
         }
+    }
+
+    /// stat -> RETURN explist
+    fn retstat(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_return);
+        self.token = try self.lexer.next();
+
+        var return_values = std.ArrayList(*Node).init(self.allocator);
+        defer return_values.deinit();
+
+        const no_return_values = block_follow(self.token) or (self.token.id == .single_char and self.token.char.? == ';');
+        if (!no_return_values) {
+            _ = try self.explist1(&return_values);
+        }
+
+        const node = try self.arena.create(Node.ReturnStatement);
+        node.* = .{
+            .values = try self.arena.dupe(*Node, return_values.items),
+        };
+        return &node.base;
     }
 
     /// sort of the equivalent of Lua's test_then_block in lparser.c but handles else too
@@ -170,6 +190,7 @@ pub const Parser = struct {
         unreachable;
     }
 
+    /// stat -> LOCAL NAME {`,' NAME} [`=' explist1]
     fn localstat(self: *Self) Error!*Node {
         var names = std.ArrayList(Token).init(self.allocator);
         defer names.deinit();
@@ -586,6 +607,26 @@ test "if statements" {
         \\   literal true
         \\  then
         \\  if_clause else
+        \\
+    );
+}
+
+test "return statements" {
+    try testParse("return",
+        \\chunk
+        \\ return_statement
+        \\
+    );
+    try testParse("return nil, true, x, 'a', b()",
+        \\chunk
+        \\ return_statement
+        \\  literal nil
+        \\  literal true
+        \\  identifier
+        \\  literal <string>
+        \\  call
+        \\   identifier
+        \\   ()
         \\
     );
 }

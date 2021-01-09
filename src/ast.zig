@@ -33,6 +33,7 @@ pub const Node = struct {
         index_access,
         if_statement,
         if_clause,
+        return_statement,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -45,6 +46,7 @@ pub const Node = struct {
                 .index_access => IndexAccess,
                 .if_statement => IfStatement,
                 .if_clause => IfClause,
+                .return_statement => ReturnStatement,
             };
         }
     };
@@ -107,6 +109,11 @@ pub const Node = struct {
         if_token: Token,
         condition: ?*Node,
         body: []*Node,
+    };
+
+    pub const ReturnStatement = struct {
+        base: Node = .{ .id = .return_statement },
+        values: []*Node,
     };
 
     pub fn dump(
@@ -196,6 +203,13 @@ pub const Node = struct {
                 }
                 for (if_clause.body) |body_node| {
                     try body_node.dump(writer, indent + 1);
+                }
+            },
+            .return_statement => {
+                const return_statement = @fieldParentPtr(Node.ReturnStatement, "base", node);
+                try writer.writeAll("\n");
+                for (return_statement.values) |value_node| {
+                    try value_node.dump(writer, indent + 1);
                 }
             },
         }

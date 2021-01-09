@@ -26,15 +26,21 @@ pub const Node = struct {
     pub const Id = enum {
         chunk,
         call,
-        string_literal,
+        literal,
         identifier,
+        local_statement,
+        field_access,
+        index_access,
 
         pub fn Type(id: Id) type {
             return switch (id) {
                 .chunk => Chunk,
                 .call => Call,
-                .string_literal => StringLiteral,
+                .literal => Literal,
                 .identifier => Identifier,
+                .local_statement => LocalStatement,
+                .field_access => FieldAccess,
+                .index_access => IndexAccess,
             };
         }
     };
@@ -57,14 +63,33 @@ pub const Node = struct {
         arguments: []*Node,
     };
 
-    pub const StringLiteral = struct {
-        base: Node = .{ .id = .string_literal },
+    pub const Literal = struct {
+        base: Node = .{ .id = .literal },
         token: Token,
     };
 
     pub const Identifier = struct {
         base: Node = .{ .id = .identifier },
         token: Token,
+    };
+
+    pub const LocalStatement = struct {
+        base: Node = .{ .id = .local_statement },
+        names: []Token,
+        values: []*Node,
+    };
+
+    pub const FieldAccess = struct {
+        base: Node = .{ .id = .field_access },
+        prefix: *Node,
+        field: Token,
+        separator: Token,
+    };
+
+    pub const IndexAccess = struct {
+        base: Node = .{ .id = .index_access },
+        prefix: *Node,
+        index: *Node,
     };
 
     pub fn dump(
@@ -74,27 +99,67 @@ pub const Node = struct {
     ) @TypeOf(writer).Error!void {
         try writer.writeByteNTimes(' ', indent);
         try writer.writeAll(@tagName(node.id));
-        try writer.writeAll("\n");
         switch (node.id) {
             .chunk => {
+                try writer.writeAll("\n");
                 const chunk = @fieldParentPtr(Node.Chunk, "base", node);
                 for (chunk.body) |body_node| {
                     try body_node.dump(writer, indent + 1);
                 }
             },
             .call => {
+                try writer.writeAll("\n");
                 const call = @fieldParentPtr(Node.Call, "base", node);
                 try call.expression.dump(writer, indent + 1);
                 try writer.writeByteNTimes(' ', indent + 1);
-                try writer.writeAll("(\n");
-                for (call.arguments) |arg_node| {
-                    try arg_node.dump(writer, indent + 2);
+                try writer.writeAll("(");
+                if (call.arguments.len > 0) {
+                    try writer.writeAll("\n");
+                    for (call.arguments) |arg_node| {
+                        try arg_node.dump(writer, indent + 2);
+                    }
+                    try writer.writeByteNTimes(' ', indent + 1);
                 }
-                try writer.writeByteNTimes(' ', indent + 1);
                 try writer.writeAll(")\n");
             },
-            .identifier => {},
-            .string_literal => {},
+            .identifier => {
+                try writer.writeAll("\n");
+            },
+            .literal => {
+                const literal = @fieldParentPtr(Node.Literal, "base", node);
+                try writer.writeAll(" ");
+                try writer.writeAll(literal.token.nameForDisplay());
+                try writer.writeAll("\n");
+            },
+            .local_statement => {
+                const local = @fieldParentPtr(Node.LocalStatement, "base", node);
+                for (local.names) |name_token| {
+                    try writer.writeAll(" ");
+                    try writer.writeAll(name_token.nameForDisplay());
+                }
+                if (local.values.len > 0) {
+                    try writer.writeAll(" =\n");
+                    for (local.values) |value_node| {
+                        try value_node.dump(writer, indent + 1);
+                    }
+                } else {
+                    try writer.writeAll("\n");
+                }
+            },
+            .field_access => {
+                const field_access = @fieldParentPtr(Node.FieldAccess, "base", node);
+                try writer.writeAll(" ");
+                try writer.writeAll(field_access.separator.nameForDisplay());
+                try writer.writeAll(field_access.field.nameForDisplay());
+                try writer.writeAll("\n");
+                try field_access.prefix.dump(writer, indent + 1);
+            },
+            .index_access => {
+                const index_access = @fieldParentPtr(Node.IndexAccess, "base", node);
+                try writer.writeAll("\n");
+                try index_access.prefix.dump(writer, indent + 1);
+                try index_access.index.dump(writer, indent + 1);
+            },
         }
     }
 };

@@ -41,6 +41,11 @@ pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
     return tree;
 }
 
+pub const ParseError = error{
+    ExpectedCloseParen,
+    FunctionArgumentsExpected,
+};
+
 pub const Parser = struct {
     const Self = @This();
 
@@ -49,8 +54,10 @@ pub const Parser = struct {
     allocator: *Allocator,
     arena: *Allocator,
 
+    pub const Error = ParseError || Lexer.Error || Allocator.Error;
+
     /// chunk -> { stat [`;'] }
-    fn chunk(self: *Self) !*Node {
+    fn chunk(self: *Self) Error!*Node {
         var statements = std.ArrayList(*Node).init(self.allocator);
         defer statements.deinit();
 
@@ -68,45 +75,219 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    fn statement(self: *Self) !*Node {
-        // TODO: other statements
-        return self.exprstat();
+    fn statement(self: *Self) Error!*Node {
+        switch (self.token.id) {
+            .keyword_if => return self.ifstat(),
+            .keyword_local => {
+                self.token = try self.lexer.next();
+                if (try self.testnext(.keyword_function)) {
+                    return self.localfunc();
+                } else {
+                    return self.localstat();
+                }
+            },
+            .keyword_while,
+            .keyword_do,
+            .keyword_for,
+            .keyword_repeat,
+            .keyword_function,
+            .keyword_return,
+            .keyword_break,
+            => unreachable,
+            else => return self.exprstat(),
+        }
     }
 
-    fn exprstat(self: *Self) !*Node {
+    fn ifstat(self: *Self) Error!*Node {
+        unreachable;
+    }
+
+    fn localfunc(self: *Self) Error!*Node {
+        unreachable;
+    }
+
+    fn localstat(self: *Self) Error!*Node {
+        var names = std.ArrayList(Token).init(self.allocator);
+        defer names.deinit();
+
+        while (true) {
+            std.debug.assert(self.token.id == .name); // TODO check()
+            try names.append(self.token);
+            self.token = try self.lexer.next();
+
+            if (!try self.testcharnext(',')) break;
+        }
+
+        var values = std.ArrayList(*Node).init(self.allocator);
+        defer values.deinit();
+
+        if (try self.testcharnext('=')) {
+            _ = try self.explist1(&values);
+        }
+
+        var local = try self.arena.create(Node.LocalStatement);
+        local.* = .{
+            .names = try self.arena.dupe(Token, names.items),
+            .values = try self.arena.dupe(*Node, values.items),
+        };
+        return &local.base;
+    }
+
+    fn exprstat(self: *Self) Error!*Node {
         return self.primaryexp();
     }
 
-    fn primaryexp(self: *Self) !*Node {
+    fn explist1(self: *Self, list: *std.ArrayList(*Node)) Error!usize {
+        var num_expressions: usize = 1;
+        try list.append(try self.expr());
+        while (try self.testcharnext(',')) {
+            try list.append(try self.expr());
+        }
+        return num_expressions;
+    }
+
+    fn simpleexp(self: *Self) Error!*Node {
+        switch (self.token.id) {
+            .string, .number, .keyword_false, .keyword_true, .keyword_nil, .ellipsis => {
+                // TODO: "cannot use ... outside a vararg function"
+                // or should that be a compile error instead?
+                const node = try self.arena.create(Node.Literal);
+                node.* = .{
+                    .token = self.token,
+                };
+                self.token = try self.lexer.next();
+                return &node.base;
+            },
+            .single_char => {
+                switch (self.token.char.?) {
+                    '{' => unreachable, // TODO
+                    else => {},
+                }
+            },
+            .keyword_function => unreachable, // TODO
+            else => {},
+        }
+        return self.primaryexp();
+    }
+
+    fn expr(self: *Self) Error!*Node {
+        return self.simpleexp();
+    }
+
+    fn primaryexp(self: *Self) Error!*Node {
         var arguments = std.ArrayList(*Node).init(self.allocator);
         defer arguments.deinit();
 
-        var prefix = try self.prefixexp();
-        while (true) {
+        var node = try self.prefixexp();
+        var is_func_call = false;
+        loop: while (true) {
             switch (self.token.id) {
-                .single_char => unreachable, // TODO
-                .string => {
-                    const node = try self.arena.create(Node.StringLiteral);
-                    node.* = .{
-                        .token = self.token,
-                    };
-                    try arguments.append(&node.base);
-                    self.token = try self.lexer.next();
+                .single_char => {
+                    switch (self.token.char.?) {
+                        '.' => {
+                            const separator = self.token;
+                            self.token = try self.lexer.next(); // skip the dot
+                            std.debug.assert(self.token.id == .name); // TODO check()
+
+                            var new_node = try self.arena.create(Node.FieldAccess);
+                            new_node.* = .{
+                                .prefix = node,
+                                .field = self.token,
+                                .separator = separator,
+                            };
+                            node = &new_node.base;
+
+                            self.token = try self.lexer.next();
+                        },
+                        '[' => {
+                            self.token = try self.lexer.next(); // skip the [
+                            const index = try self.expr();
+                            std.debug.assert(self.token.id == .single_char and self.token.char.? == ']'); // TODO check()
+
+                            var new_node = try self.arena.create(Node.IndexAccess);
+                            new_node.* = .{
+                                .prefix = node,
+                                .index = index,
+                            };
+                            node = &new_node.base;
+
+                            self.token = try self.lexer.next();
+                        },
+                        ':' => {
+                            const separator = self.token;
+                            self.token = try self.lexer.next(); // skip the :
+                            std.debug.assert(self.token.id == .name); // TODO check()
+
+                            var new_node = try self.arena.create(Node.FieldAccess);
+                            new_node.* = .{
+                                .prefix = node,
+                                .field = self.token,
+                                .separator = separator,
+                            };
+                            node = &new_node.base;
+
+                            self.token = try self.lexer.next();
+                            node = try self.funcargs(node);
+                        },
+                        '(' => {
+                            is_func_call = true;
+                            node = try self.funcargs(node);
+                        },
+                        else => break :loop,
+                    }
                 },
-                .eof => break,
-                else => unreachable,
+                .string => {
+                    is_func_call = true;
+                    node = try self.funcargs(node);
+                },
+                else => break :loop,
             }
+        }
+
+        return node;
+    }
+
+    fn funcargs(self: *Self, expression: *Node) Error!*Node {
+        var arguments = std.ArrayList(*Node).init(self.allocator);
+        defer arguments.deinit();
+
+        switch (self.token.id) {
+            .single_char => switch (self.token.char.?) {
+                '(' => {
+                    self.token = try self.lexer.next();
+                    const has_no_arguments = self.token.id == .single_char and self.token.char.? == ')';
+                    if (!has_no_arguments) {
+                        _ = try self.explist1(&arguments);
+                    }
+                    if (!(try self.testcharnext(')'))) {
+                        return error.ExpectedCloseParen;
+                    }
+                },
+                '{' => unreachable, // TODO table constructor call
+                else => {
+                    return error.FunctionArgumentsExpected;
+                },
+            },
+            .string => {
+                const node = try self.arena.create(Node.Literal);
+                node.* = .{
+                    .token = self.token,
+                };
+                try arguments.append(&node.base);
+                self.token = try self.lexer.next();
+            },
+            else => return error.FunctionArgumentsExpected,
         }
 
         var call = try self.arena.create(Node.Call);
         call.* = .{
-            .expression = prefix,
+            .expression = expression,
             .arguments = try self.arena.dupe(*Node, arguments.items),
         };
         return &call.base;
     }
 
-    fn prefixexp(self: *Self) !*Node {
+    fn prefixexp(self: *Self) Error!*Node {
         switch (self.token.id) {
             .name => {
                 const node = try self.arena.create(Node.Identifier);
@@ -152,24 +333,10 @@ pub const Parser = struct {
     }
 };
 
-test "parse hello world" {
+test "check hello world ast" {
     const allocator = std.testing.allocator;
     var tree = try parse(allocator, "print \"hello world\"");
     defer tree.deinit();
-
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
-
-    try tree.dump(buf.writer());
-    std.testing.expectEqualStrings(buf.items,
-        \\chunk
-        \\ call
-        \\  identifier
-        \\  (
-        \\   string_literal
-        \\  )
-        \\
-    );
 
     std.testing.expectEqual(Node.Id.chunk, tree.node.id);
     const chunk = tree.node.cast(.chunk).?;
@@ -178,5 +345,152 @@ test "parse hello world" {
     const call = chunk.body[0].cast(.call).?;
     std.testing.expectEqual(Node.Id.identifier, call.expression.id);
     std.testing.expectEqual(@as(usize, 1), call.arguments.len);
-    std.testing.expectEqual(Node.Id.string_literal, call.arguments[0].id);
+    std.testing.expectEqual(Node.Id.literal, call.arguments[0].id);
+}
+
+fn testParse(source: []const u8, expected_ast_dump: []const u8) !void {
+    const allocator = std.testing.allocator;
+    var tree = try parse(allocator, source);
+    defer tree.deinit();
+
+    var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
+
+    try tree.dump(buf.writer());
+    std.testing.expectEqualStrings(expected_ast_dump, buf.items);
+}
+
+test "hello world" {
+    try testParse("print \"hello world\"",
+        \\chunk
+        \\ call
+        \\  identifier
+        \\  (
+        \\   literal <string>
+        \\  )
+        \\
+    );
+    try testParse("print(\"hello world\")",
+        \\chunk
+        \\ call
+        \\  identifier
+        \\  (
+        \\   literal <string>
+        \\  )
+        \\
+    );
+}
+
+test "function call" {
+    try testParse("print(123)",
+        \\chunk
+        \\ call
+        \\  identifier
+        \\  (
+        \\   literal <number>
+        \\  )
+        \\
+    );
+    try testParse("print(\"hello\", 'world', nil, true, false, 123)",
+        \\chunk
+        \\ call
+        \\  identifier
+        \\  (
+        \\   literal <string>
+        \\   literal <string>
+        \\   literal nil
+        \\   literal true
+        \\   literal false
+        \\   literal <number>
+        \\  )
+        \\
+    );
+    // chained
+    try testParse("a()()()",
+        \\chunk
+        \\ call
+        \\  call
+        \\   call
+        \\    identifier
+        \\    ()
+        \\   ()
+        \\  ()
+        \\
+    );
+}
+
+test "local statements" {
+    try testParse("local x, y",
+        \\chunk
+        \\ local_statement <name> <name>
+        \\
+    );
+    try testParse("local x = nil",
+        \\chunk
+        \\ local_statement <name> =
+        \\  literal nil
+        \\
+    );
+    try testParse("local x, y = nil, true",
+        \\chunk
+        \\ local_statement <name> <name> =
+        \\  literal nil
+        \\  literal true
+        \\
+    );
+    try testParse("local x, y = z",
+        \\chunk
+        \\ local_statement <name> <name> =
+        \\  identifier
+        \\
+    );
+}
+
+test "field and index access" {
+    try testParse("z.a",
+        \\chunk
+        \\ field_access .<name>
+        \\  identifier
+        \\
+    );
+    try testParse("z.a.b.c",
+        \\chunk
+        \\ field_access .<name>
+        \\  field_access .<name>
+        \\   field_access .<name>
+        \\    identifier
+        \\
+    );
+    try testParse("z.a['b'].c",
+        \\chunk
+        \\ field_access .<name>
+        \\  index_access
+        \\   field_access .<name>
+        \\    identifier
+        \\   literal <string>
+        \\
+    );
+    try testParse("z.a[b.a[1]].c",
+        \\chunk
+        \\ field_access .<name>
+        \\  index_access
+        \\   field_access .<name>
+        \\    identifier
+        \\   index_access
+        \\    field_access .<name>
+        \\     identifier
+        \\    literal <number>
+        \\
+    );
+    try testParse("a.b:c 'd'",
+        \\chunk
+        \\ call
+        \\  field_access :<name>
+        \\   field_access .<name>
+        \\    identifier
+        \\  (
+        \\   literal <string>
+        \\  )
+        \\
+    );
 }

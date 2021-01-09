@@ -18,6 +18,8 @@
 pub const OpCode = packed enum(u6) {
     // TODO: rest of the opcodes
     loadk = 1,
+    loadbool = 2,
+    loadnil = 3,
     getglobal = 5,
     call = 28,
     @"return" = 30,
@@ -44,22 +46,25 @@ pub const OpCode = packed enum(u6) {
 
     pub fn getBMode(self: OpCode) OpArgMask {
         return switch (self) {
+            .loadnil => .RegisterOrJumpOffset,
             .loadk, .getglobal => .ConstantOrRegisterConstant,
-            .call, .@"return" => .Used,
+            .call, .@"return", .loadbool => .Used,
         };
     }
 
     pub fn getCMode(self: OpCode) OpArgMask {
         return switch (self) {
             .loadk, .getglobal => .NotUsed,
-            .call => .Used,
-            .@"return" => .NotUsed,
+            .call, .loadbool => .Used,
+            .@"return", .loadnil => .NotUsed,
         };
     }
 
     pub fn testAMode(self: OpCode) bool {
         return switch (self) {
             .loadk => true,
+            .loadbool => true,
+            .loadnil => true,
             .getglobal => true,
             .call => true,
             .@"return" => false,
@@ -69,6 +74,8 @@ pub const OpCode = packed enum(u6) {
     pub fn testTMode(self: OpCode) bool {
         return switch (self) {
             .loadk,
+            .loadbool,
+            .loadnil,
             .getglobal,
             .call,
             .@"return",

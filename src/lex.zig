@@ -205,6 +205,8 @@ pub const Lexer = struct {
     // for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
     long_str_nesting_compat: bool = false,
 
+    pub const Error = LexError;
+
     pub fn init(buffer: []const u8) Self {
         return Self{
             .buffer = buffer,

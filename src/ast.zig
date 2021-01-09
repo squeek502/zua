@@ -38,6 +38,8 @@ pub const Node = struct {
         do_statement,
         repeat_statement,
         break_statement,
+        for_statement_numeric,
+        for_statement_generic,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -55,6 +57,8 @@ pub const Node = struct {
                 .do_statement => DoStatement,
                 .repeat_statement => RepeatStatement,
                 .break_statement => BreakStatement,
+                .for_statement_numeric => ForStatementNumeric,
+                .for_statement_generic => ForStatementGeneric,
             };
         }
     };
@@ -144,6 +148,22 @@ pub const Node = struct {
     pub const BreakStatement = struct {
         base: Node = .{ .id = .break_statement },
         token: Token,
+    };
+
+    pub const ForStatementNumeric = struct {
+        base: Node = .{ .id = .for_statement_numeric },
+        name: Token,
+        start: *Node,
+        end: *Node,
+        increment: ?*Node,
+        body: []*Node,
+    };
+
+    pub const ForStatementGeneric = struct {
+        base: Node = .{ .id = .for_statement_generic },
+        names: []Token,
+        expressions: []*Node,
+        body: []*Node,
     };
 
     pub fn dump(
@@ -271,6 +291,38 @@ pub const Node = struct {
             },
             .break_statement => {
                 try writer.writeAll("\n");
+            },
+            .for_statement_numeric => {
+                const for_statement = @fieldParentPtr(Node.ForStatementNumeric, "base", node);
+                try writer.writeAll("\n");
+                try for_statement.start.dump(writer, indent + 1);
+                try for_statement.end.dump(writer, indent + 1);
+                if (for_statement.increment) |increment| {
+                    try increment.dump(writer, indent + 1);
+                }
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("do\n");
+                for (for_statement.body) |body_node| {
+                    try body_node.dump(writer, indent + 1);
+                }
+            },
+            .for_statement_generic => {
+                const for_statement = @fieldParentPtr(Node.ForStatementGeneric, "base", node);
+                for (for_statement.names) |name_token| {
+                    try writer.writeAll(" ");
+                    try writer.writeAll(name_token.nameForDisplay());
+                }
+                try writer.writeAll("\n");
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("in\n");
+                for (for_statement.expressions) |exp_node| {
+                    try exp_node.dump(writer, indent + 1);
+                }
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("do\n");
+                for (for_statement.body) |body_node| {
+                    try body_node.dump(writer, indent + 1);
+                }
             },
         }
     }

@@ -44,6 +44,7 @@ pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
 pub const ParseError = error{
     ExpectedCloseParen,
     FunctionArgumentsExpected,
+    ExpectedEqualsOrIn,
 };
 
 pub const Parser = struct {
@@ -88,9 +89,8 @@ pub const Parser = struct {
             .keyword_do => return self.dostat(),
             .keyword_repeat => return self.repeatstat(),
             .keyword_break => return self.breakstat(),
-            .keyword_for,
-            .keyword_function,
-            => unreachable,
+            .keyword_for => return self.forstat(),
+            .keyword_function => unreachable,
             else => return self.exprstat(),
         }
     }
@@ -205,6 +205,106 @@ pub const Parser = struct {
             .body = try self.arena.dupe(*Node, body.items),
         };
         return &node.base;
+    }
+
+    /// forstat -> FOR (fornum | forlist) END
+    fn forstat(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_for);
+        self.token = try self.lexer.next();
+
+        std.debug.assert(self.token.id == .name); // TODO checkname
+        const name_token = self.token;
+        self.token = try self.lexer.next();
+
+        var for_node: *Node = undefined;
+
+        switch (self.token.id) {
+            .single_char => switch (self.token.char.?) {
+                '=' => for_node = try self.fornum(name_token),
+                ',' => for_node = try self.forlist(name_token),
+                else => return error.ExpectedEqualsOrIn,
+            },
+            .keyword_in => for_node = try self.forlist(name_token),
+            else => return error.ExpectedEqualsOrIn,
+        }
+
+        std.debug.assert(self.token.id == .keyword_end); // TODO checkmatch
+        self.token = try self.lexer.next();
+
+        return for_node;
+    }
+
+    /// fornum -> NAME = exp1,exp1[,exp1] forbody
+    fn fornum(self: *Self, name_token: Token) Error!*Node {
+        std.debug.assert(self.token.id == .single_char and self.token.char.? == '='); // TODO checknext
+        self.token = try self.lexer.next();
+
+        const start_expression = try self.exp1();
+
+        std.debug.assert(self.token.id == .single_char and self.token.char.? == ','); // TODO checknext
+        self.token = try self.lexer.next();
+
+        const end_expression = try self.exp1();
+
+        var increment_expression: ?*Node = null;
+        if (try self.testcharnext(',')) {
+            increment_expression = try self.exp1();
+        }
+
+        std.debug.assert(self.token.id == .keyword_do); // TODO checknext
+        self.token = try self.lexer.next();
+
+        var body = std.ArrayList(*Node).init(self.allocator);
+        defer body.deinit();
+
+        try self.block(&body);
+
+        var for_node = try self.arena.create(Node.ForStatementNumeric);
+        for_node.* = .{
+            .name = name_token,
+            .start = start_expression,
+            .end = end_expression,
+            .increment = increment_expression,
+            .body = try self.arena.dupe(*Node, body.items),
+        };
+        return &for_node.base;
+    }
+
+    /// forlist -> NAME {,NAME} IN explist1 forbody
+    fn forlist(self: *Self, first_name_token: Token) Error!*Node {
+        var names = try std.ArrayList(Token).initCapacity(self.allocator, 1);
+        defer names.deinit();
+
+        names.appendAssumeCapacity(first_name_token);
+
+        while (try self.testcharnext(',')) {
+            std.debug.assert(self.token.id == .name); // TODO checkname
+            try names.append(self.token);
+            self.token = try self.lexer.next();
+        }
+        std.debug.assert(self.token.id == .keyword_in); // TODO checknext
+        self.token = try self.lexer.next();
+
+        var expressions = std.ArrayList(*Node).init(self.allocator);
+        defer expressions.deinit();
+
+        _ = try self.explist1(&expressions);
+
+        std.debug.assert(self.token.id == .keyword_do); // TODO checknext
+        self.token = try self.lexer.next();
+
+        var body = std.ArrayList(*Node).init(self.allocator);
+        defer body.deinit();
+
+        try self.block(&body);
+
+        var for_node = try self.arena.create(Node.ForStatementGeneric);
+        for_node.* = .{
+            .names = try self.arena.dupe(Token, names.items),
+            .expressions = try self.arena.dupe(*Node, expressions.items),
+            .body = try self.arena.dupe(*Node, body.items),
+        };
+        return &for_node.base;
     }
 
     /// sort of the equivalent of Lua's test_then_block in lparser.c but handles else too
@@ -346,6 +446,11 @@ pub const Parser = struct {
 
     fn expr(self: *Self) Error!*Node {
         return self.simpleexp();
+    }
+
+    // TODO could probably be eliminated in favor of just calling expr directly
+    fn exp1(self: *Self) Error!*Node {
+        return self.expr();
     }
 
     fn primaryexp(self: *Self) Error!*Node {
@@ -759,6 +864,58 @@ test "break statements" {
     try testParse("break",
         \\chunk
         \\ break_statement
+        \\
+    );
+}
+
+test "numeric for statements" {
+    try testParse("for i=1,2 do end",
+        \\chunk
+        \\ for_statement_numeric
+        \\  literal <number>
+        \\  literal <number>
+        \\ do
+        \\
+    );
+    try testParse("for i=1,2,a do b() end",
+        \\chunk
+        \\ for_statement_numeric
+        \\  literal <number>
+        \\  literal <number>
+        \\  identifier
+        \\ do
+        \\  call
+        \\   identifier
+        \\   ()
+        \\
+    );
+}
+
+test "generic for statements" {
+    try testParse("for k,v in ipairs(a) do end",
+        \\chunk
+        \\ for_statement_generic <name> <name>
+        \\ in
+        \\  call
+        \\   identifier
+        \\   (
+        \\    identifier
+        \\   )
+        \\ do
+        \\
+    );
+    try testParse("for a in b,c,d,e do f() end",
+        \\chunk
+        \\ for_statement_generic <name>
+        \\ in
+        \\  identifier
+        \\  identifier
+        \\  identifier
+        \\  identifier
+        \\ do
+        \\  call
+        \\   identifier
+        \\   ()
         \\
     );
 }

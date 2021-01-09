@@ -86,8 +86,8 @@ pub const Parser = struct {
             .keyword_return => return self.retstat(),
             .keyword_while => return self.whilestat(),
             .keyword_do => return self.dostat(),
+            .keyword_repeat => return self.repeatstat(),
             .keyword_for,
-            .keyword_repeat,
             .keyword_function,
             .keyword_break,
             => unreachable,
@@ -172,8 +172,33 @@ pub const Parser = struct {
         return &node.base;
     }
 
+    /// repeatstat -> REPEAT block UNTIL cond
+    fn repeatstat(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_repeat);
+        self.token = try self.lexer.next();
+
+        var body = std.ArrayList(*Node).init(self.allocator);
+        defer body.deinit();
+
+        try self.block(&body);
+
+        std.debug.assert(self.token.id == .keyword_until); // TODO: check_match
+        self.token = try self.lexer.next();
+
+        const condition = try self.cond();
+
+        const node = try self.arena.create(Node.RepeatStatement);
+        node.* = .{
+            .condition = condition,
+            .body = try self.arena.dupe(*Node, body.items),
+        };
+        return &node.base;
+    }
+
     /// sort of the equivalent of Lua's test_then_block in lparser.c but handles else too
     fn ifclause(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_if or self.token.id == .keyword_elseif or self.token.id == .keyword_else);
+
         const if_token = self.token;
         var condition: ?*Node = null;
 
@@ -701,6 +726,19 @@ test "do statements" {
         \\  call
         \\   identifier
         \\   ()
+        \\
+    );
+}
+
+test "repeat statements" {
+    try testParse("repeat b() until a",
+        \\chunk
+        \\ repeat_statement
+        \\  call
+        \\   identifier
+        \\   ()
+        \\ until
+        \\  identifier
         \\
     );
 }

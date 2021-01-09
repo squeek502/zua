@@ -36,6 +36,7 @@ pub const Node = struct {
         return_statement,
         while_statement,
         do_statement,
+        repeat_statement,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -51,6 +52,7 @@ pub const Node = struct {
                 .return_statement => ReturnStatement,
                 .while_statement => WhileStatement,
                 .do_statement => DoStatement,
+                .repeat_statement => RepeatStatement,
             };
         }
     };
@@ -129,6 +131,12 @@ pub const Node = struct {
     pub const DoStatement = struct {
         base: Node = .{ .id = .do_statement },
         body: []*Node,
+    };
+
+    pub const RepeatStatement = struct {
+        base: Node = .{ .id = .repeat_statement },
+        body: []*Node,
+        condition: *Node,
     };
 
     pub fn dump(
@@ -243,6 +251,16 @@ pub const Node = struct {
                 for (do_statement.body) |body_node| {
                     try body_node.dump(writer, indent + 1);
                 }
+            },
+            .repeat_statement => {
+                const repeat_statement = @fieldParentPtr(Node.RepeatStatement, "base", node);
+                try writer.writeAll("\n");
+                for (repeat_statement.body) |body_node| {
+                    try body_node.dump(writer, indent + 1);
+                }
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll("until\n");
+                try repeat_statement.condition.dump(writer, indent + 1);
             },
         }
     }

@@ -84,7 +84,7 @@ pub const Parser = struct {
                 }
             },
             .keyword_return => return self.retstat(),
-            .keyword_while,
+            .keyword_while => return self.whilestat(),
             .keyword_do,
             .keyword_for,
             .keyword_repeat,
@@ -122,6 +122,37 @@ pub const Parser = struct {
         return &node.base;
     }
 
+    /// cond -> exp
+    fn cond(self: *Self) Error!*Node {
+        return self.expr();
+    }
+
+    /// whilestat -> WHILE cond DO block END
+    fn whilestat(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_while);
+        self.token = try self.lexer.next();
+
+        const condition = try self.cond();
+
+        std.debug.assert(self.token.id == .keyword_do); // TODO: checknext
+        self.token = try self.lexer.next();
+
+        var body = std.ArrayList(*Node).init(self.allocator);
+        defer body.deinit();
+
+        try self.block(&body);
+
+        std.debug.assert(self.token.id == .keyword_end); // TODO check_match
+        self.token = try self.lexer.next();
+
+        var while_statement = try self.arena.create(Node.WhileStatement);
+        while_statement.* = .{
+            .condition = condition,
+            .body = try self.arena.dupe(*Node, body.items),
+        };
+        return &while_statement.base;
+    }
+
     /// sort of the equivalent of Lua's test_then_block in lparser.c but handles else too
     fn ifclause(self: *Self) Error!*Node {
         const if_token = self.token;
@@ -130,7 +161,7 @@ pub const Parser = struct {
         self.token = try self.lexer.next();
         switch (if_token.id) {
             .keyword_if, .keyword_elseif => {
-                condition = try self.expr();
+                condition = try self.cond();
 
                 std.debug.assert(self.token.id == .keyword_then); // TODO checknext
                 self.token = try self.lexer.next();
@@ -624,6 +655,19 @@ test "return statements" {
         \\  literal true
         \\  identifier
         \\  literal <string>
+        \\  call
+        \\   identifier
+        \\   ()
+        \\
+    );
+}
+
+test "while statements" {
+    try testParse("while a do b() end",
+        \\chunk
+        \\ while_statement
+        \\  identifier
+        \\ do
         \\  call
         \\   identifier
         \\   ()

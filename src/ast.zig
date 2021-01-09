@@ -31,6 +31,8 @@ pub const Node = struct {
         local_statement,
         field_access,
         index_access,
+        if_statement,
+        if_clause,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -41,6 +43,8 @@ pub const Node = struct {
                 .local_statement => LocalStatement,
                 .field_access => FieldAccess,
                 .index_access => IndexAccess,
+                .if_statement => IfStatement,
+                .if_clause => IfClause,
             };
         }
     };
@@ -90,6 +94,19 @@ pub const Node = struct {
         base: Node = .{ .id = .index_access },
         prefix: *Node,
         index: *Node,
+    };
+
+    pub const IfStatement = struct {
+        base: Node = .{ .id = .if_statement },
+        clauses: []*Node,
+    };
+
+    /// if, elseif, or else
+    pub const IfClause = struct {
+        base: Node = .{ .id = .if_clause },
+        if_token: Token,
+        condition: ?*Node,
+        body: []*Node,
     };
 
     pub fn dump(
@@ -159,6 +176,27 @@ pub const Node = struct {
                 try writer.writeAll("\n");
                 try index_access.prefix.dump(writer, indent + 1);
                 try index_access.index.dump(writer, indent + 1);
+            },
+            .if_statement => {
+                const if_statement = @fieldParentPtr(Node.IfStatement, "base", node);
+                try writer.writeAll("\n");
+                for (if_statement.clauses) |clause| {
+                    try clause.dump(writer, indent + 1);
+                }
+            },
+            .if_clause => {
+                const if_clause = @fieldParentPtr(Node.IfClause, "base", node);
+                try writer.writeAll(" ");
+                try writer.writeAll(if_clause.if_token.nameForDisplay());
+                try writer.writeAll("\n");
+                if (if_clause.condition) |condition| {
+                    try condition.dump(writer, indent + 1);
+                    try writer.writeByteNTimes(' ', indent);
+                    try writer.writeAll("then\n");
+                }
+                for (if_clause.body) |body_node| {
+                    try body_node.dump(writer, indent + 1);
+                }
             },
         }
     }

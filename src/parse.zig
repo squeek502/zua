@@ -63,10 +63,7 @@ pub const Parser = struct {
 
         // TODO: islast
         // TODO: levels
-        while (!block_follow(self.token)) {
-            try statements.append(try self.statement());
-            _ = try self.testcharnext(';');
-        }
+        try self.block(&statements);
 
         const node = try self.arena.create(Node.Chunk);
         node.* = .{
@@ -98,8 +95,75 @@ pub const Parser = struct {
         }
     }
 
+    fn block(self: *Self, list: *std.ArrayList(*Node)) Error!void {
+        while (!block_follow(self.token)) {
+            try list.append(try self.statement());
+            _ = try self.testcharnext(';');
+        }
+    }
+
+    /// sort of the equivalent of Lua's test_then_block in lparser.c but handles else too
+    fn ifclause(self: *Self) Error!*Node {
+        const if_token = self.token;
+        var condition: ?*Node = null;
+
+        self.token = try self.lexer.next();
+        switch (if_token.id) {
+            .keyword_if, .keyword_elseif => {
+                condition = try self.expr();
+
+                std.debug.assert(self.token.id == .keyword_then); // TODO checknext
+                self.token = try self.lexer.next();
+            },
+            .keyword_else => {},
+            else => unreachable,
+        }
+
+        var body = std.ArrayList(*Node).init(self.allocator);
+        defer body.deinit();
+
+        try self.block(&body);
+
+        var if_clause = try self.arena.create(Node.IfClause);
+        if_clause.* = .{
+            .if_token = if_token,
+            .condition = condition,
+            .body = try self.arena.dupe(*Node, body.items),
+        };
+        return &if_clause.base;
+    }
+
+    /// ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END
     fn ifstat(self: *Self) Error!*Node {
-        unreachable;
+        std.debug.assert(self.token.id == .keyword_if);
+
+        var clauses = std.ArrayList(*Node).init(self.allocator);
+        defer clauses.deinit();
+
+        // if
+        const if_clause = try self.ifclause();
+        try clauses.append(if_clause);
+
+        // elseif
+        while (self.token.id == .keyword_elseif) {
+            const elseif_clause = try self.ifclause();
+            try clauses.append(elseif_clause);
+        }
+
+        // else
+        if (self.token.id == .keyword_else) {
+            const else_clause = try self.ifclause();
+            try clauses.append(else_clause);
+        }
+
+        std.debug.assert(self.token.id == .keyword_end); // TODO check_match
+        self.token = try self.lexer.next();
+
+        var if_statement = try self.arena.create(Node.IfStatement);
+        if_statement.* = .{
+            .clauses = try self.arena.dupe(*Node, clauses.items),
+        };
+        return &if_statement.base;
     }
 
     fn localfunc(self: *Self) Error!*Node {
@@ -146,6 +210,8 @@ pub const Parser = struct {
         return num_expressions;
     }
 
+    /// simpleexp -> NUMBER | STRING | NIL | true | false | ... |
+    ///              constructor | FUNCTION body | primaryexp
     fn simpleexp(self: *Self) Error!*Node {
         switch (self.token.id) {
             .string, .number, .keyword_false, .keyword_true, .keyword_nil, .ellipsis => {
@@ -160,7 +226,7 @@ pub const Parser = struct {
             },
             .single_char => {
                 switch (self.token.char.?) {
-                    '{' => unreachable, // TODO
+                    '{' => unreachable, // TODO constructor
                     else => {},
                 }
             },
@@ -491,6 +557,35 @@ test "field and index access" {
         \\  (
         \\   literal <string>
         \\  )
+        \\
+    );
+}
+
+test "if statements" {
+    try testParse("if a then b() end",
+        \\chunk
+        \\ if_statement
+        \\  if_clause if
+        \\   identifier
+        \\  then
+        \\   call
+        \\    identifier
+        \\    ()
+        \\
+    );
+    try testParse("if a then elseif b then elseif true then else end",
+        \\chunk
+        \\ if_statement
+        \\  if_clause if
+        \\   identifier
+        \\  then
+        \\  if_clause elseif
+        \\   identifier
+        \\  then
+        \\  if_clause elseif
+        \\   literal true
+        \\  then
+        \\  if_clause else
         \\
     );
 }

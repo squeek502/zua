@@ -126,7 +126,7 @@ pub const Parser = struct {
     }
 
     /// body ->  `(' parlist `)' chunk END
-    fn funcbody(self: *Self, name: *Node, is_local: bool) Error!*Node {
+    fn funcbody(self: *Self, name: ?*Node, is_local: bool) Error!*Node {
         std.debug.assert(self.token.isChar('(')); // TODO checknext
         self.token = try self.lexer.next();
 
@@ -553,7 +553,10 @@ pub const Parser = struct {
                     else => {},
                 }
             },
-            .keyword_function => unreachable, // TODO
+            .keyword_function => {
+                self.token = try self.lexer.next(); // skip function
+                return self.funcbody(null, false);
+            },
             else => {},
         }
         return self.primaryexp();
@@ -1071,6 +1074,16 @@ test "function declarations" {
         \\ function_declaration
         \\  identifier
         \\  (<name> <name> ...)
+        \\
+    );
+}
+
+test "anonymous function" {
+    try testParse("local a = function() end",
+        \\chunk
+        \\ local_statement <name> =
+        \\  function_declaration
+        \\   ()
         \\
     );
 }

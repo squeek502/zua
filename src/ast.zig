@@ -170,7 +170,7 @@ pub const Node = struct {
 
     pub const FunctionDeclaration = struct {
         base: Node = .{ .id = .function_declaration },
-        name: *Node,
+        name: ?*Node, // null for anonymous functions
         parameters: []Token,
         body: []*Node,
         is_local: bool,
@@ -340,7 +340,9 @@ pub const Node = struct {
                     try writer.writeAll(" local");
                 }
                 try writer.writeAll("\n");
-                try func.name.dump(writer, indent + 1);
+                if (func.name) |name| {
+                    try name.dump(writer, indent + 1);
+                }
                 try writer.writeByteNTimes(' ', indent + 1);
                 try writer.writeAll("(");
                 for (func.parameters) |param, i| {

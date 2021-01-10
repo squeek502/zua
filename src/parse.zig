@@ -45,6 +45,7 @@ pub const ParseError = error{
     ExpectedCloseParen,
     FunctionArgumentsExpected,
     ExpectedEqualsOrIn,
+    ExpectedNameOrVarArg,
 };
 
 pub const Parser = struct {
@@ -90,7 +91,7 @@ pub const Parser = struct {
             .keyword_repeat => return self.repeatstat(),
             .keyword_break => return self.breakstat(),
             .keyword_for => return self.forstat(),
-            .keyword_function => unreachable,
+            .keyword_function => return self.funcstat(),
             else => return self.exprstat(),
         }
     }
@@ -102,6 +103,112 @@ pub const Parser = struct {
         }
     }
 
+    /// parlist -> [ param { `,' param } ]
+    fn parlist(self: *Self, list: *std.ArrayList(Token)) Error!void {
+        // no params
+        if (self.token.isChar(')')) return;
+
+        var found_vararg = false;
+        while (true) {
+            switch (self.token.id) {
+                .name => {},
+                .ellipsis => {
+                    found_vararg = true;
+                },
+                else => return error.ExpectedNameOrVarArg,
+            }
+            try list.append(self.token);
+            self.token = try self.lexer.next();
+            if (found_vararg or !try self.testcharnext(',')) {
+                break;
+            }
+        }
+    }
+
+    /// body ->  `(' parlist `)' chunk END
+    fn funcbody(self: *Self, name: *Node, is_local: bool) Error!*Node {
+        std.debug.assert(self.token.isChar('(')); // TODO checknext
+        self.token = try self.lexer.next();
+
+        var params = std.ArrayList(Token).init(self.allocator);
+        defer params.deinit();
+
+        try self.parlist(&params);
+
+        std.debug.assert(self.token.isChar(')')); // TODO checknext
+        self.token = try self.lexer.next();
+
+        var body = std.ArrayList(*Node).init(self.allocator);
+        defer body.deinit();
+
+        try self.block(&body);
+
+        std.debug.assert(self.token.id == .keyword_end); // TODO check_match
+        self.token = try self.lexer.next();
+
+        const node = try self.arena.create(Node.FunctionDeclaration);
+        node.* = .{
+            .name = name,
+            .parameters = try self.arena.dupe(Token, params.items),
+            .body = try self.arena.dupe(*Node, body.items),
+            .is_local = is_local,
+        };
+        return &node.base;
+    }
+
+    // funcstat -> FUNCTION funcname body
+    fn funcstat(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .keyword_function);
+        self.token = try self.lexer.next();
+
+        const name = try self.funcname();
+        return self.funcbody(name, false);
+    }
+
+    // funcname -> NAME {field} [`:' NAME]
+    fn funcname(self: *Self) Error!*Node {
+        std.debug.assert(self.token.id == .name); // TODO checkname
+        var identifier_node = try self.arena.create(Node.Identifier);
+        identifier_node.* = .{
+            .token = self.token,
+        };
+        var node = &identifier_node.base;
+
+        self.token = try self.lexer.next();
+        while (self.token.isChar('.')) {
+            const separator = self.token;
+            self.token = try self.lexer.next();
+            std.debug.assert(self.token.id == .name); // TODO checkname
+
+            var new_node = try self.arena.create(Node.FieldAccess);
+            new_node.* = .{
+                .prefix = node,
+                .field = self.token,
+                .separator = separator,
+            };
+            node = &new_node.base;
+
+            self.token = try self.lexer.next();
+        }
+        if (self.token.isChar(':')) {
+            const separator = self.token;
+            self.token = try self.lexer.next();
+            std.debug.assert(self.token.id == .name); // TODO checkname
+
+            var new_node = try self.arena.create(Node.FieldAccess);
+            new_node.* = .{
+                .prefix = node,
+                .field = self.token,
+                .separator = separator,
+            };
+            node = &new_node.base;
+
+            self.token = try self.lexer.next();
+        }
+
+        return node;
+    }
+
     /// stat -> RETURN explist
     fn retstat(self: *Self) Error!*Node {
         std.debug.assert(self.token.id == .keyword_return);
@@ -110,7 +217,7 @@ pub const Parser = struct {
         var return_values = std.ArrayList(*Node).init(self.allocator);
         defer return_values.deinit();
 
-        const no_return_values = block_follow(self.token) or (self.token.id == .single_char and self.token.char.? == ';');
+        const no_return_values = block_follow(self.token) or (self.token.isChar(';'));
         if (!no_return_values) {
             _ = try self.explist1(&return_values);
         }
@@ -236,12 +343,12 @@ pub const Parser = struct {
 
     /// fornum -> NAME = exp1,exp1[,exp1] forbody
     fn fornum(self: *Self, name_token: Token) Error!*Node {
-        std.debug.assert(self.token.id == .single_char and self.token.char.? == '='); // TODO checknext
+        std.debug.assert(self.token.isChar('=')); // TODO checknext
         self.token = try self.lexer.next();
 
         const start_expression = try self.exp1();
 
-        std.debug.assert(self.token.id == .single_char and self.token.char.? == ','); // TODO checknext
+        std.debug.assert(self.token.isChar(',')); // TODO checknext
         self.token = try self.lexer.next();
 
         const end_expression = try self.exp1();
@@ -374,7 +481,15 @@ pub const Parser = struct {
     }
 
     fn localfunc(self: *Self) Error!*Node {
-        unreachable;
+        std.debug.assert(self.token.id == .name); // TODO checkname
+
+        var name = try self.arena.create(Node.Identifier);
+        name.* = .{
+            .token = self.token,
+        };
+        self.token = try self.lexer.next();
+
+        return self.funcbody(&name.base, true);
     }
 
     /// stat -> LOCAL NAME {`,' NAME} [`=' explist1]
@@ -481,7 +596,7 @@ pub const Parser = struct {
                         '[' => {
                             self.token = try self.lexer.next(); // skip the [
                             const index = try self.expr();
-                            std.debug.assert(self.token.id == .single_char and self.token.char.? == ']'); // TODO check()
+                            std.debug.assert(self.token.isChar(']')); // TODO check()
 
                             var new_node = try self.arena.create(Node.IndexAccess);
                             new_node.* = .{
@@ -534,7 +649,7 @@ pub const Parser = struct {
             .single_char => switch (self.token.char.?) {
                 '(' => {
                     self.token = try self.lexer.next();
-                    const has_no_arguments = self.token.id == .single_char and self.token.char.? == ')';
+                    const has_no_arguments = self.token.isChar(')');
                     if (!has_no_arguments) {
                         _ = try self.explist1(&arguments);
                     }
@@ -604,7 +719,7 @@ pub const Parser = struct {
 
     /// Skip to next token if the current token is a single character token with the given value
     fn testcharnext(self: *Self, char: u8) !bool {
-        if (self.token.id == .single_char and self.token.char.? == char) {
+        if (self.token.isChar(char)) {
             self.token = try self.lexer.next();
             return true;
         }
@@ -916,6 +1031,46 @@ test "generic for statements" {
         \\  call
         \\   identifier
         \\   ()
+        \\
+    );
+}
+
+test "function declarations" {
+    try testParse("function a() end",
+        \\chunk
+        \\ function_declaration
+        \\  identifier
+        \\  ()
+        \\
+    );
+    try testParse("local function a() end",
+        \\chunk
+        \\ function_declaration local
+        \\  identifier
+        \\  ()
+        \\
+    );
+    try testParse("function a.b:c() end",
+        \\chunk
+        \\ function_declaration
+        \\  field_access :<name>
+        \\   field_access .<name>
+        \\    identifier
+        \\  ()
+        \\
+    );
+    try testParse("local function a(b, c, ...) end",
+        \\chunk
+        \\ function_declaration local
+        \\  identifier
+        \\  (<name> <name> ...)
+        \\
+    );
+    try testParse("function a(b, c, ...) end",
+        \\chunk
+        \\ function_declaration
+        \\  identifier
+        \\  (<name> <name> ...)
         \\
     );
 }

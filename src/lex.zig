@@ -31,6 +31,11 @@ pub const Token = struct {
     // TODO: figure out something better for this (it's only used for nameForDisplay)
     char: ?u8,
 
+    /// Helper for .single_char tokens
+    pub fn isChar(self: *const Token, expected_char: u8) bool {
+        return self.id == .single_char and self.char.? == expected_char;
+    }
+
     pub const Keyword = struct {
         pub fn idFromName(name: []const u8) ?Id {
             return keywords.get(name);

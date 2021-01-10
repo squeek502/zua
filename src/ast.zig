@@ -40,6 +40,7 @@ pub const Node = struct {
         break_statement,
         for_statement_numeric,
         for_statement_generic,
+        function_declaration,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -59,6 +60,7 @@ pub const Node = struct {
                 .break_statement => BreakStatement,
                 .for_statement_numeric => ForStatementNumeric,
                 .for_statement_generic => ForStatementGeneric,
+                .function_declaration => FunctionDeclaration,
             };
         }
     };
@@ -164,6 +166,14 @@ pub const Node = struct {
         names: []Token,
         expressions: []*Node,
         body: []*Node,
+    };
+
+    pub const FunctionDeclaration = struct {
+        base: Node = .{ .id = .function_declaration },
+        name: *Node,
+        parameters: []Token,
+        body: []*Node,
+        is_local: bool,
     };
 
     pub fn dump(
@@ -322,6 +332,24 @@ pub const Node = struct {
                 try writer.writeAll("do\n");
                 for (for_statement.body) |body_node| {
                     try body_node.dump(writer, indent + 1);
+                }
+            },
+            .function_declaration => {
+                const func = @fieldParentPtr(Node.FunctionDeclaration, "base", node);
+                if (func.is_local) {
+                    try writer.writeAll(" local");
+                }
+                try writer.writeAll("\n");
+                try func.name.dump(writer, indent + 1);
+                try writer.writeByteNTimes(' ', indent + 1);
+                try writer.writeAll("(");
+                for (func.parameters) |param, i| {
+                    if (i != 0) try writer.writeAll(" ");
+                    try writer.writeAll(param.nameForDisplay());
+                }
+                try writer.writeAll(")\n");
+                for (func.body) |body_node| {
+                    try body_node.dump(writer, indent + 2);
                 }
             },
         }

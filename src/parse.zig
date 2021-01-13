@@ -494,34 +494,61 @@ pub const Parser = struct {
 
     /// stat -> LOCAL NAME {`,' NAME} [`=' explist1]
     fn localstat(self: *Self) Error!*Node {
-        var names = std.ArrayList(Token).init(self.allocator);
-        defer names.deinit();
+        return try self.assignment(null);
+    }
 
-        while (true) {
-            std.debug.assert(self.token.id == .name); // TODO check()
-            try names.append(self.token);
-            self.token = try self.lexer.next();
+    /// if first_variable is null, then this is a local assignment
+    fn assignment(self: *Self, first_variable: ?*Node) Error!*Node {
+        const is_local = first_variable == null;
 
-            if (!try self.testcharnext(',')) break;
-        }
+        var variables = std.ArrayList(*Node).init(self.allocator);
+        defer variables.deinit();
 
         var values = std.ArrayList(*Node).init(self.allocator);
         defer values.deinit();
 
-        if (try self.testcharnext('=')) {
+        if (is_local) {
+            while (true) {
+                std.debug.assert(self.token.id == .name); // TODO check()
+                var identifier = try self.arena.create(Node.Identifier);
+                identifier.* = .{ .token = self.token };
+                try variables.append(&identifier.base);
+
+                self.token = try self.lexer.next();
+
+                if (!try self.testcharnext(',')) break;
+            }
+            if (try self.testcharnext('=')) {
+                _ = try self.explist1(&values);
+            }
+        } else {
+            try variables.append(first_variable.?);
+            while (try self.testcharnext(',')) {
+                const variable = try self.primaryexp();
+                try variables.append(variable);
+            }
+            std.debug.assert(self.token.isChar('=')); // TODO checknext
+            self.token = try self.lexer.next();
             _ = try self.explist1(&values);
         }
 
-        var local = try self.arena.create(Node.LocalStatement);
+        var local = try self.arena.create(Node.AssignmentStatement);
         local.* = .{
-            .names = try self.arena.dupe(Token, names.items),
+            .variables = try self.arena.dupe(*Node, variables.items),
             .values = try self.arena.dupe(*Node, values.items),
+            .is_local = is_local,
         };
         return &local.base;
     }
 
+    /// stat -> func | assignment
     fn exprstat(self: *Self) Error!*Node {
-        return self.primaryexp();
+        var node = try self.primaryexp();
+        // if it's not a call, then it's an assignment
+        if (node.id != .call) {
+            node = try self.assignment(node);
+        }
+        return node;
     }
 
     fn explist1(self: *Self, list: *std.ArrayList(*Node)) Error!usize {
@@ -694,7 +721,10 @@ pub const Parser = struct {
                 self.token = try self.lexer.next();
                 return &node.base;
             },
-            else => unreachable, // TODO
+            else => {
+                std.debug.print("{}\n", .{self.token});
+                unreachable; // TODO
+            },
         }
     }
 
@@ -819,64 +849,86 @@ test "function call" {
 test "local statements" {
     try testParse("local x, y",
         \\chunk
-        \\ local_statement <name> <name>
+        \\ assignment_statement local
+        \\  identifier
+        \\  identifier
         \\
     );
     try testParse("local x = nil",
         \\chunk
-        \\ local_statement <name> =
+        \\ assignment_statement local
+        \\  identifier
+        \\ =
         \\  literal nil
         \\
     );
     try testParse("local x, y = nil, true",
         \\chunk
-        \\ local_statement <name> <name> =
+        \\ assignment_statement local
+        \\  identifier
+        \\  identifier
+        \\ =
         \\  literal nil
         \\  literal true
         \\
     );
     try testParse("local x, y = z",
         \\chunk
-        \\ local_statement <name> <name> =
+        \\ assignment_statement local
+        \\  identifier
+        \\  identifier
+        \\ =
         \\  identifier
         \\
     );
 }
 
 test "field and index access" {
-    try testParse("z.a",
+    try testParse("z.a = nil",
         \\chunk
-        \\ field_access .<name>
-        \\  identifier
+        \\ assignment_statement
+        \\  field_access .<name>
+        \\   identifier
+        \\ =
+        \\  literal nil
         \\
     );
-    try testParse("z.a.b.c",
+    try testParse("z.a.b.c = nil",
         \\chunk
-        \\ field_access .<name>
+        \\ assignment_statement
         \\  field_access .<name>
         \\   field_access .<name>
-        \\    identifier
+        \\    field_access .<name>
+        \\     identifier
+        \\ =
+        \\  literal nil
         \\
     );
-    try testParse("z.a['b'].c",
+    try testParse("z.a['b'].c = nil",
         \\chunk
-        \\ field_access .<name>
-        \\  index_access
-        \\   field_access .<name>
-        \\    identifier
-        \\   literal <string>
-        \\
-    );
-    try testParse("z.a[b.a[1]].c",
-        \\chunk
-        \\ field_access .<name>
-        \\  index_access
-        \\   field_access .<name>
-        \\    identifier
+        \\ assignment_statement
+        \\  field_access .<name>
         \\   index_access
         \\    field_access .<name>
         \\     identifier
-        \\    literal <number>
+        \\    literal <string>
+        \\ =
+        \\  literal nil
+        \\
+    );
+    try testParse("z.a[b.a[1]].c = nil",
+        \\chunk
+        \\ assignment_statement
+        \\  field_access .<name>
+        \\   index_access
+        \\    field_access .<name>
+        \\     identifier
+        \\    index_access
+        \\     field_access .<name>
+        \\      identifier
+        \\     literal <number>
+        \\ =
+        \\  literal nil
         \\
     );
     try testParse("a.b:c 'd'",
@@ -1081,9 +1133,37 @@ test "function declarations" {
 test "anonymous function" {
     try testParse("local a = function() end",
         \\chunk
-        \\ local_statement <name> =
+        \\ assignment_statement local
+        \\  identifier
+        \\ =
         \\  function_declaration
         \\   ()
+        \\
+    );
+}
+
+test "assignment" {
+    try testParse("test = nil",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  literal nil
+        \\
+    );
+    try testParse("a, b, c.d, e[f] = nil, true",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\  identifier
+        \\  field_access .<name>
+        \\   identifier
+        \\  index_access
+        \\   identifier
+        \\   identifier
+        \\ =
+        \\  literal nil
+        \\  literal true
         \\
     );
 }

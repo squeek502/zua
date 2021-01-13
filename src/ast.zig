@@ -28,7 +28,7 @@ pub const Node = struct {
         call,
         literal,
         identifier,
-        local_statement,
+        assignment_statement,
         field_access,
         index_access,
         if_statement,
@@ -48,7 +48,7 @@ pub const Node = struct {
                 .call => Call,
                 .literal => Literal,
                 .identifier => Identifier,
-                .local_statement => LocalStatement,
+                .assignment_statement => AssignmentStatement,
                 .field_access => FieldAccess,
                 .index_access => IndexAccess,
                 .if_statement => IfStatement,
@@ -93,10 +93,11 @@ pub const Node = struct {
         token: Token,
     };
 
-    pub const LocalStatement = struct {
-        base: Node = .{ .id = .local_statement },
-        names: []Token,
+    pub const AssignmentStatement = struct {
+        base: Node = .{ .id = .assignment_statement },
+        variables: []*Node,
         values: []*Node,
+        is_local: bool,
     };
 
     pub const FieldAccess = struct {
@@ -215,19 +216,21 @@ pub const Node = struct {
                 try writer.writeAll(literal.token.nameForDisplay());
                 try writer.writeAll("\n");
             },
-            .local_statement => {
-                const local = @fieldParentPtr(Node.LocalStatement, "base", node);
-                for (local.names) |name_token| {
-                    try writer.writeAll(" ");
-                    try writer.writeAll(name_token.nameForDisplay());
+            .assignment_statement => {
+                const assignment = @fieldParentPtr(Node.AssignmentStatement, "base", node);
+                if (assignment.is_local) {
+                    try writer.writeAll(" local");
                 }
-                if (local.values.len > 0) {
-                    try writer.writeAll(" =\n");
-                    for (local.values) |value_node| {
+                try writer.writeAll("\n");
+                for (assignment.variables) |var_node| {
+                    try var_node.dump(writer, indent + 1);
+                }
+                if (assignment.values.len > 0) {
+                    try writer.writeByteNTimes(' ', indent);
+                    try writer.writeAll("=\n");
+                    for (assignment.values) |value_node| {
                         try value_node.dump(writer, indent + 1);
                     }
-                } else {
-                    try writer.writeAll("\n");
                 }
             },
             .field_access => {

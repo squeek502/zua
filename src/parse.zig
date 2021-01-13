@@ -46,6 +46,8 @@ pub const ParseError = error{
     FunctionArgumentsExpected,
     ExpectedEqualsOrIn,
     ExpectedNameOrVarArg,
+    UnexpectedSymbol,
+    SyntaxError,
 };
 
 pub const Parser = struct {
@@ -57,6 +59,11 @@ pub const Parser = struct {
     arena: *Allocator,
 
     pub const Error = ParseError || Lexer.Error || Allocator.Error;
+
+    pub const PossibleLValueExpression = struct {
+        node: *Node,
+        can_be_assigned_to: bool = true,
+    };
 
     /// chunk -> { stat [`;'] }
     fn chunk(self: *Self) Error!*Node {
@@ -498,7 +505,7 @@ pub const Parser = struct {
     }
 
     /// if first_variable is null, then this is a local assignment
-    fn assignment(self: *Self, first_variable: ?*Node) Error!*Node {
+    fn assignment(self: *Self, first_variable: ?PossibleLValueExpression) Error!*Node {
         const is_local = first_variable == null;
 
         var variables = std.ArrayList(*Node).init(self.allocator);
@@ -522,10 +529,17 @@ pub const Parser = struct {
                 _ = try self.explist1(&values);
             }
         } else {
-            try variables.append(first_variable.?);
-            while (try self.testcharnext(',')) {
-                const variable = try self.primaryexp();
-                try variables.append(variable);
+            var variable = first_variable.?;
+            while (true) {
+                if (!variable.can_be_assigned_to) {
+                    return error.SyntaxError;
+                }
+                try variables.append(variable.node);
+                if (try self.testcharnext(',')) {
+                    variable = try self.primaryexp();
+                } else {
+                    break;
+                }
             }
             std.debug.assert(self.token.isChar('=')); // TODO checknext
             self.token = try self.lexer.next();
@@ -543,12 +557,12 @@ pub const Parser = struct {
 
     /// stat -> func | assignment
     fn exprstat(self: *Self) Error!*Node {
-        var node = try self.primaryexp();
+        var expression = try self.primaryexp();
         // if it's not a call, then it's an assignment
-        if (node.id != .call) {
-            node = try self.assignment(node);
+        if (expression.node.id != .call) {
+            expression.node = try self.assignment(expression);
         }
-        return node;
+        return expression.node;
     }
 
     fn explist1(self: *Self, list: *std.ArrayList(*Node)) Error!usize {
@@ -586,7 +600,8 @@ pub const Parser = struct {
             },
             else => {},
         }
-        return self.primaryexp();
+        const expression = try self.primaryexp();
+        return expression.node;
     }
 
     fn expr(self: *Self) Error!*Node {
@@ -598,11 +613,11 @@ pub const Parser = struct {
         return self.expr();
     }
 
-    fn primaryexp(self: *Self) Error!*Node {
+    fn primaryexp(self: *Self) Error!PossibleLValueExpression {
         var arguments = std.ArrayList(*Node).init(self.allocator);
         defer arguments.deinit();
 
-        var node = try self.prefixexp();
+        var expression = try self.prefixexp();
         var is_func_call = false;
         loop: while (true) {
             switch (self.token.id) {
@@ -615,11 +630,12 @@ pub const Parser = struct {
 
                             var new_node = try self.arena.create(Node.FieldAccess);
                             new_node.* = .{
-                                .prefix = node,
+                                .prefix = expression.node,
                                 .field = self.token,
                                 .separator = separator,
                             };
-                            node = &new_node.base;
+                            expression.node = &new_node.base;
+                            expression.can_be_assigned_to = true;
 
                             self.token = try self.lexer.next();
                         },
@@ -630,10 +646,11 @@ pub const Parser = struct {
 
                             var new_node = try self.arena.create(Node.IndexAccess);
                             new_node.* = .{
-                                .prefix = node,
+                                .prefix = expression.node,
                                 .index = index,
                             };
-                            node = &new_node.base;
+                            expression.node = &new_node.base;
+                            expression.can_be_assigned_to = true;
 
                             self.token = try self.lexer.next();
                         },
@@ -644,31 +661,33 @@ pub const Parser = struct {
 
                             var new_node = try self.arena.create(Node.FieldAccess);
                             new_node.* = .{
-                                .prefix = node,
+                                .prefix = expression.node,
                                 .field = self.token,
                                 .separator = separator,
                             };
-                            node = &new_node.base;
+                            expression.node = &new_node.base;
+                            expression.can_be_assigned_to = false;
 
                             self.token = try self.lexer.next();
-                            node = try self.funcargs(node);
+                            expression.node = try self.funcargs(expression.node);
                         },
                         '(' => {
-                            is_func_call = true;
-                            node = try self.funcargs(node);
+                            expression.node = try self.funcargs(expression.node);
+                            expression.can_be_assigned_to = false;
                         },
+                        '{' => unreachable, // TODO table constructor
                         else => break :loop,
                     }
                 },
                 .string => {
-                    is_func_call = true;
-                    node = try self.funcargs(node);
+                    expression.node = try self.funcargs(expression.node);
+                    expression.can_be_assigned_to = false;
                 },
                 else => break :loop,
             }
         }
 
-        return node;
+        return expression;
     }
 
     fn funcargs(self: *Self, expression: *Node) Error!*Node {
@@ -711,7 +730,7 @@ pub const Parser = struct {
         return &call.base;
     }
 
-    fn prefixexp(self: *Self) Error!*Node {
+    fn prefixexp(self: *Self) Error!PossibleLValueExpression {
         switch (self.token.id) {
             .name => {
                 const node = try self.arena.create(Node.Identifier);
@@ -719,13 +738,26 @@ pub const Parser = struct {
                     .token = self.token,
                 };
                 self.token = try self.lexer.next();
-                return &node.base;
+                return PossibleLValueExpression{ .node = &node.base };
             },
-            else => {
-                std.debug.print("{}\n", .{self.token});
-                unreachable; // TODO
+            .single_char => switch (self.token.char.?) {
+                '(' => {
+                    self.token = try self.lexer.next();
+                    const node = try self.expr();
+
+                    std.debug.assert(self.token.isChar(')')); // TODO check_match
+                    self.token = try self.lexer.next();
+
+                    return PossibleLValueExpression{
+                        .node = node,
+                        .can_be_assigned_to = false,
+                    };
+                },
+                else => {},
             },
+            else => {},
         }
+        return error.UnexpectedSymbol;
     }
 
     // TODO: move to Token?
@@ -785,6 +817,10 @@ fn testParse(source: []const u8, expected_ast_dump: []const u8) !void {
 
     try tree.dump(buf.writer());
     std.testing.expectEqualStrings(expected_ast_dump, buf.items);
+}
+
+fn expectParseError(expected: ParseError, source: []const u8) void {
+    std.testing.expectError(expected, testParse(source, ""));
 }
 
 test "hello world" {
@@ -1166,4 +1202,32 @@ test "assignment" {
         \\  literal true
         \\
     );
+    try testParse("(a).b = nil",
+        \\chunk
+        \\ assignment_statement
+        \\  field_access .<name>
+        \\   identifier
+        \\ =
+        \\  literal nil
+        \\
+    );
+    try testParse("a().b = nil",
+        \\chunk
+        \\ assignment_statement
+        \\  field_access .<name>
+        \\   call
+        \\    identifier
+        \\    ()
+        \\ =
+        \\  literal nil
+        \\
+    );
+}
+
+test "assignment errors" {
+    expectParseError(error.SyntaxError, "(a) = nil");
+    expectParseError(error.UnexpectedSymbol, "(a)() = nil");
+    expectParseError(error.FunctionArgumentsExpected, "a:b = nil");
+    expectParseError(error.SyntaxError, "(a)");
+    expectParseError(error.UnexpectedSymbol, "true = nil");
 }

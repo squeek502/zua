@@ -48,6 +48,7 @@ pub const ParseError = error{
     ExpectedNameOrVarArg,
     UnexpectedSymbol,
     SyntaxError,
+    ExpectedDifferentToken, // error_expected in lparser.c
 };
 
 pub const Parser = struct {
@@ -134,24 +135,21 @@ pub const Parser = struct {
 
     /// body ->  `(' parlist `)' chunk END
     fn funcbody(self: *Self, name: ?*Node, is_local: bool) Error!*Node {
-        std.debug.assert(self.token.isChar('(')); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checkcharnext('(');
 
         var params = std.ArrayList(Token).init(self.allocator);
         defer params.deinit();
 
         try self.parlist(&params);
 
-        std.debug.assert(self.token.isChar(')')); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checkcharnext(')');
 
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
 
         try self.block(&body);
 
-        std.debug.assert(self.token.id == .keyword_end); // TODO check_match
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_end); // TODO check_match
 
         const node = try self.arena.create(Node.FunctionDeclaration);
         node.* = .{
@@ -174,43 +172,38 @@ pub const Parser = struct {
 
     // funcname -> NAME {field} [`:' NAME]
     fn funcname(self: *Self) Error!*Node {
-        std.debug.assert(self.token.id == .name); // TODO checkname
+        const name_token = try self.checkname();
         var identifier_node = try self.arena.create(Node.Identifier);
         identifier_node.* = .{
-            .token = self.token,
+            .token = name_token,
         };
         var node = &identifier_node.base;
 
-        self.token = try self.lexer.next();
         while (self.token.isChar('.')) {
             const separator = self.token;
-            self.token = try self.lexer.next();
-            std.debug.assert(self.token.id == .name); // TODO checkname
+            self.token = try self.lexer.next(); // skip separator
+            const field_token = try self.checkname();
 
             var new_node = try self.arena.create(Node.FieldAccess);
             new_node.* = .{
                 .prefix = node,
-                .field = self.token,
+                .field = field_token,
                 .separator = separator,
             };
             node = &new_node.base;
-
-            self.token = try self.lexer.next();
         }
         if (self.token.isChar(':')) {
             const separator = self.token;
             self.token = try self.lexer.next();
-            std.debug.assert(self.token.id == .name); // TODO checkname
+            const field_token = try self.checkname();
 
             var new_node = try self.arena.create(Node.FieldAccess);
             new_node.* = .{
                 .prefix = node,
-                .field = self.token,
+                .field = field_token,
                 .separator = separator,
             };
             node = &new_node.base;
-
-            self.token = try self.lexer.next();
         }
 
         return node;
@@ -248,16 +241,14 @@ pub const Parser = struct {
 
         const condition = try self.cond();
 
-        std.debug.assert(self.token.id == .keyword_do); // TODO: checknext
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_do);
 
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
 
         try self.block(&body);
 
-        std.debug.assert(self.token.id == .keyword_end); // TODO check_match
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_end); // TODO check_match
 
         var while_statement = try self.arena.create(Node.WhileStatement);
         while_statement.* = .{
@@ -288,8 +279,7 @@ pub const Parser = struct {
 
         try self.block(&body);
 
-        std.debug.assert(self.token.id == .keyword_end); // TODO: check_match
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_end); // TODO: check_match
 
         const node = try self.arena.create(Node.DoStatement);
         node.* = .{
@@ -308,8 +298,7 @@ pub const Parser = struct {
 
         try self.block(&body);
 
-        std.debug.assert(self.token.id == .keyword_until); // TODO: check_match
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_until); // TODO: check_match
 
         const condition = try self.cond();
 
@@ -326,9 +315,7 @@ pub const Parser = struct {
         std.debug.assert(self.token.id == .keyword_for);
         self.token = try self.lexer.next();
 
-        std.debug.assert(self.token.id == .name); // TODO checkname
-        const name_token = self.token;
-        self.token = try self.lexer.next();
+        const name_token = try self.checkname();
 
         var for_node: *Node = undefined;
 
@@ -342,21 +329,18 @@ pub const Parser = struct {
             else => return error.ExpectedEqualsOrIn,
         }
 
-        std.debug.assert(self.token.id == .keyword_end); // TODO checkmatch
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_end); // TODO check_match
 
         return for_node;
     }
 
     /// fornum -> NAME = exp1,exp1[,exp1] forbody
     fn fornum(self: *Self, name_token: Token) Error!*Node {
-        std.debug.assert(self.token.isChar('=')); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checkcharnext('=');
 
         const start_expression = try self.exp1();
 
-        std.debug.assert(self.token.isChar(',')); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checkcharnext(',');
 
         const end_expression = try self.exp1();
 
@@ -365,8 +349,7 @@ pub const Parser = struct {
             increment_expression = try self.exp1();
         }
 
-        std.debug.assert(self.token.id == .keyword_do); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_do);
 
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
@@ -392,20 +375,17 @@ pub const Parser = struct {
         names.appendAssumeCapacity(first_name_token);
 
         while (try self.testcharnext(',')) {
-            std.debug.assert(self.token.id == .name); // TODO checkname
-            try names.append(self.token);
-            self.token = try self.lexer.next();
+            const name_token = try self.checkname();
+            try names.append(name_token);
         }
-        std.debug.assert(self.token.id == .keyword_in); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_in);
 
         var expressions = std.ArrayList(*Node).init(self.allocator);
         defer expressions.deinit();
 
         _ = try self.explist1(&expressions);
 
-        std.debug.assert(self.token.id == .keyword_do); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_do);
 
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
@@ -432,9 +412,7 @@ pub const Parser = struct {
         switch (if_token.id) {
             .keyword_if, .keyword_elseif => {
                 condition = try self.cond();
-
-                std.debug.assert(self.token.id == .keyword_then); // TODO checknext
-                self.token = try self.lexer.next();
+                try self.checknext(.keyword_then);
             },
             .keyword_else => {},
             else => unreachable,
@@ -477,8 +455,7 @@ pub const Parser = struct {
             try clauses.append(else_clause);
         }
 
-        std.debug.assert(self.token.id == .keyword_end); // TODO check_match
-        self.token = try self.lexer.next();
+        try self.checknext(.keyword_end); // TODO check_match
 
         var if_statement = try self.arena.create(Node.IfStatement);
         if_statement.* = .{
@@ -488,14 +465,9 @@ pub const Parser = struct {
     }
 
     fn localfunc(self: *Self) Error!*Node {
-        std.debug.assert(self.token.id == .name); // TODO checkname
-
+        const name_token = try self.checkname();
         var name = try self.arena.create(Node.Identifier);
-        name.* = .{
-            .token = self.token,
-        };
-        self.token = try self.lexer.next();
-
+        name.* = .{ .token = name_token };
         return self.funcbody(&name.base, true);
     }
 
@@ -514,15 +486,13 @@ pub const Parser = struct {
     fn recfield(self: *Self) Error!*Node {
         var key: *Node = get_key: {
             if (self.token.id == .name) { // TODO checkname
+                const name_token = try self.checkname();
                 // This might be kinda weird, but the name token here is actually used as
                 // more of a string literal, so create a Literal node instead of Identifier.
                 // This is a special case.
                 // TODO revisit this?
                 var name_node = try self.arena.create(Node.Literal);
-                name_node.* = .{
-                    .token = self.token,
-                };
-                self.token = try self.lexer.next();
+                name_node.* = .{ .token = name_token };
                 break :get_key &name_node.base;
             } else {
                 std.debug.assert(self.token.isChar('['));
@@ -530,14 +500,12 @@ pub const Parser = struct {
 
                 const key_expr = try self.expr();
 
-                std.debug.assert(self.token.isChar(']')); // TODO checknext()
-                self.token = try self.lexer.next();
+                try self.checkcharnext(']');
 
                 break :get_key key_expr;
             }
         };
-        std.debug.assert(self.token.isChar('=')); // TODO checknext()
-        self.token = try self.lexer.next();
+        try self.checkcharnext('=');
 
         const value = try self.expr();
 
@@ -551,8 +519,7 @@ pub const Parser = struct {
 
     /// constructor -> ??
     fn constructor(self: *Self) Error!*Node {
-        std.debug.assert(self.token.isChar('{')); // TODO checknext
-        self.token = try self.lexer.next();
+        try self.checkcharnext('{');
 
         var fields = std.ArrayList(*Node).init(self.allocator);
         defer fields.deinit();
@@ -582,8 +549,7 @@ pub const Parser = struct {
             if (!has_more) break;
         }
 
-        std.debug.assert(self.token.isChar('}')); // TODO check_match
-        self.token = try self.lexer.next();
+        try self.checkcharnext('}'); // TODO check_match
 
         var node = try self.arena.create(Node.TableConstructor);
         node.* = .{
@@ -609,12 +575,10 @@ pub const Parser = struct {
 
         if (is_local) {
             while (true) {
-                std.debug.assert(self.token.id == .name); // TODO check()
+                const name_token = try self.checkname();
                 var identifier = try self.arena.create(Node.Identifier);
-                identifier.* = .{ .token = self.token };
+                identifier.* = .{ .token = name_token };
                 try variables.append(&identifier.base);
-
-                self.token = try self.lexer.next();
 
                 if (!try self.testcharnext(',')) break;
             }
@@ -634,8 +598,7 @@ pub const Parser = struct {
                     break;
                 }
             }
-            std.debug.assert(self.token.isChar('=')); // TODO checknext
-            self.token = try self.lexer.next();
+            try self.checkcharnext('=');
             _ = try self.explist1(&values);
         }
 
@@ -719,23 +682,21 @@ pub const Parser = struct {
                         '.' => {
                             const separator = self.token;
                             self.token = try self.lexer.next(); // skip the dot
-                            std.debug.assert(self.token.id == .name); // TODO check()
+                            const field_token = try self.checkname();
 
                             var new_node = try self.arena.create(Node.FieldAccess);
                             new_node.* = .{
                                 .prefix = expression.node,
-                                .field = self.token,
+                                .field = field_token,
                                 .separator = separator,
                             };
                             expression.node = &new_node.base;
                             expression.can_be_assigned_to = true;
-
-                            self.token = try self.lexer.next();
                         },
                         '[' => {
                             self.token = try self.lexer.next(); // skip the [
                             const index = try self.expr();
-                            std.debug.assert(self.token.isChar(']')); // TODO check()
+                            try self.checkcharnext(']');
 
                             var new_node = try self.arena.create(Node.IndexAccess);
                             new_node.* = .{
@@ -744,24 +705,21 @@ pub const Parser = struct {
                             };
                             expression.node = &new_node.base;
                             expression.can_be_assigned_to = true;
-
-                            self.token = try self.lexer.next();
                         },
                         ':' => {
                             const separator = self.token;
                             self.token = try self.lexer.next(); // skip the :
-                            std.debug.assert(self.token.id == .name); // TODO check()
+                            const field_token = try self.checkname();
 
                             var new_node = try self.arena.create(Node.FieldAccess);
                             new_node.* = .{
                                 .prefix = expression.node,
-                                .field = self.token,
+                                .field = field_token,
                                 .separator = separator,
                             };
                             expression.node = &new_node.base;
                             expression.can_be_assigned_to = false;
 
-                            self.token = try self.lexer.next();
                             expression.node = try self.funcargs(expression.node);
                         },
                         '(', '{' => {
@@ -794,7 +752,7 @@ pub const Parser = struct {
                     if (!has_no_arguments) {
                         _ = try self.explist1(&arguments);
                     }
-                    if (!(try self.testcharnext(')'))) {
+                    if (!(try self.testcharnext(')'))) { // TODO check_match
                         return error.ExpectedCloseParen;
                     }
                 },
@@ -840,8 +798,7 @@ pub const Parser = struct {
                     self.token = try self.lexer.next();
                     const node = try self.expr();
 
-                    std.debug.assert(self.token.isChar(')')); // TODO check_match
-                    self.token = try self.lexer.next();
+                    try self.checkcharnext(')'); // TODO check_match
 
                     return PossibleLValueExpression{
                         .node = node,
@@ -884,6 +841,32 @@ pub const Parser = struct {
             return true;
         }
         return false;
+    }
+
+    fn check(self: *Self, expected_id: Token.Id) !void {
+        if (self.token.id != expected_id) return error.ExpectedDifferentToken;
+    }
+
+    fn checkchar(self: *Self, expected_char: u8) !void {
+        if (!self.token.isChar(expected_char)) return error.ExpectedDifferentToken;
+    }
+
+    fn checknext(self: *Self, expected_id: Token.Id) !void {
+        try self.check(expected_id);
+        self.token = try self.lexer.next();
+    }
+
+    fn checkcharnext(self: *Self, expected_char: u8) !void {
+        try self.checkchar(expected_char);
+        self.token = try self.lexer.next();
+    }
+
+    // TODO eliminate?
+    /// Returns the name token, since it is typically used when constructing the AST node
+    fn checkname(self: *Self) !Token {
+        const token = self.token;
+        try self.checknext(.name);
+        return token;
     }
 };
 

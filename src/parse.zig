@@ -16,6 +16,12 @@ const Tree = @import("ast.zig").Tree;
 // The functions in Parser are currently named the same as their Lua C
 // counterparts, but that will/should probably change.
 
+/// SHRT_MAX, only used when checking the local var vector size
+pub const max_local_vars = std.math.maxInt(i16);
+
+/// LUAI_MAXVARS in luaconf.h
+pub const max_local_vars_per_func = 200;
+
 pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
     var lexer = Lexer.init(source);
     const first_token = try lexer.next();
@@ -49,6 +55,7 @@ pub const ParseError = error{
     UnexpectedSymbol,
     SyntaxError,
     ExpectedDifferentToken, // error_expected in lparser.c
+    TooManyLocalVariables,
 };
 
 pub const Parser = struct {
@@ -338,15 +345,15 @@ pub const Parser = struct {
     fn fornum(self: *Self, name_token: Token) Error!*Node {
         try self.checkcharnext('=');
 
-        const start_expression = try self.exp1();
+        const start_expression = try self.expr();
 
         try self.checkcharnext(',');
 
-        const end_expression = try self.exp1();
+        const end_expression = try self.expr();
 
         var increment_expression: ?*Node = null;
         if (try self.testcharnext(',')) {
-            increment_expression = try self.exp1();
+            increment_expression = try self.expr();
         }
 
         try self.checknext(.keyword_do);
@@ -485,7 +492,7 @@ pub const Parser = struct {
     /// recfield -> (NAME | `['exp1`]') = exp1
     fn recfield(self: *Self) Error!*Node {
         var key: *Node = get_key: {
-            if (self.token.id == .name) { // TODO checkname
+            if (self.token.id == .name) {
                 const name_token = try self.checkname();
                 // This might be kinda weird, but the name token here is actually used as
                 // more of a string literal, so create a Literal node instead of Identifier.
@@ -528,7 +535,7 @@ pub const Parser = struct {
             var field: *Node = get_field: {
                 switch (self.token.id) {
                     .name => {
-                        // TODO presumably should catch EOF here and translate it to an appropriate error
+                        // TODO presumably should catch EOF or errors here and translate them to more appropriate errors
                         const lookahead_token = try self.lexer.lookahead();
                         if (lookahead_token.isChar('=')) {
                             break :get_field try self.recfield();
@@ -579,6 +586,14 @@ pub const Parser = struct {
                 var identifier = try self.arena.create(Node.Identifier);
                 identifier.* = .{ .token = name_token };
                 try variables.append(&identifier.base);
+
+                // TODO this needs work, it doesn't really belong here.
+                // We need to keep track of *all* local vars in order to function
+                // like the Lua parser (even local var literals like `self`).
+                // Might need to be checked at compile-time rather than parse-time.
+                if (variables.items.len > max_local_vars) {
+                    return error.TooManyLocalVariables;
+                }
 
                 if (!try self.testcharnext(',')) break;
             }
@@ -662,11 +677,6 @@ pub const Parser = struct {
 
     fn expr(self: *Self) Error!*Node {
         return self.simpleexp();
-    }
-
-    // TODO could probably be eliminated in favor of just calling expr directly
-    fn exp1(self: *Self) Error!*Node {
-        return self.expr();
     }
 
     fn primaryexp(self: *Self) Error!PossibleLValueExpression {

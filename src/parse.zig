@@ -112,7 +112,7 @@ pub const Parser = struct {
     }
 
     fn block(self: *Self, list: *std.ArrayList(*Node)) Error!void {
-        while (!block_follow(self.token)) {
+        while (!blockFollow(self.token)) {
             try list.append(try self.statement());
             _ = try self.testcharnext(';');
         }
@@ -224,7 +224,7 @@ pub const Parser = struct {
         var return_values = std.ArrayList(*Node).init(self.allocator);
         defer return_values.deinit();
 
-        const no_return_values = block_follow(self.token) or (self.token.isChar(';'));
+        const no_return_values = blockFollow(self.token) or (self.token.isChar(';'));
         if (!no_return_values) {
             _ = try self.explist1(&return_values);
         }
@@ -675,8 +675,59 @@ pub const Parser = struct {
         return expression.node;
     }
 
+    pub const SubExpr = struct {
+        node: *Node,
+        untreated_operator: ?Token,
+    };
+
+    /// subexpr -> (simpleexp | unop subexpr) { binop subexpr }
+    /// where `binop' is any binary operator with a priority higher than `limit'
+    fn subexpr(self: *Self, limit: usize) Error!SubExpr {
+        var node: *Node = get_node: {
+            if (isUnaryOperator(self.token)) {
+                const unary_token = self.token;
+                self.token = try self.lexer.next();
+                var argument_expr = try self.subexpr(unary_priority);
+
+                const unary_node = try self.arena.create(Node.UnaryExpression);
+                unary_node.* = .{
+                    .operator = unary_token,
+                    .argument = argument_expr.node,
+                };
+                break :get_node &unary_node.base;
+            } else {
+                break :get_node try self.simpleexp();
+            }
+        };
+        var op: ?Token = self.token;
+        while (op != null and isBinaryOperator(op.?)) {
+            const binary_token = op.?;
+            const priority = getBinaryPriority(binary_token);
+            if (priority.left <= limit) break;
+
+            self.token = try self.lexer.next();
+            var right_expr = try self.subexpr(priority.right);
+
+            const new_node = try self.arena.create(Node.BinaryExpression);
+            new_node.* = .{
+                .operator = binary_token,
+                .left = node,
+                .right = right_expr.node,
+            };
+            node = &new_node.base;
+
+            op = right_expr.untreated_operator;
+        } else {
+            op = null;
+        }
+        return SubExpr{
+            .node = node,
+            .untreated_operator = op,
+        };
+    }
+
     fn expr(self: *Self) Error!*Node {
-        return self.simpleexp();
+        return (try self.subexpr(0)).node;
     }
 
     fn primaryexp(self: *Self) Error!PossibleLValueExpression {
@@ -822,19 +873,6 @@ pub const Parser = struct {
         return error.UnexpectedSymbol;
     }
 
-    // TODO: move to Token?
-    fn block_follow(token: Token) bool {
-        return switch (token.id) {
-            .keyword_else,
-            .keyword_elseif,
-            .keyword_end,
-            .keyword_until,
-            .eof,
-            => true,
-            else => false,
-        };
-    }
-
     /// Skip to next token if the current token matches the given ID
     fn testnext(self: *Self, id: Token.Id) !bool {
         if (self.token.id == id) {
@@ -879,6 +917,68 @@ pub const Parser = struct {
         return token;
     }
 };
+
+pub const unary_priority = 8;
+
+// TODO: move to Token?
+fn blockFollow(token: Token) bool {
+    return switch (token.id) {
+        .keyword_else,
+        .keyword_elseif,
+        .keyword_end,
+        .keyword_until,
+        .eof,
+        => true,
+        else => false,
+    };
+}
+
+// TODO: move to Token?
+fn isUnaryOperator(token: Token) bool {
+    return switch (token.id) {
+        .keyword_not => true,
+        .single_char => switch (token.char.?) {
+            '-', '#' => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
+// TODO: move to Token?
+fn isBinaryOperator(token: Token) bool {
+    return switch (token.id) {
+        .concat, .ne, .eq, .le, .ge, .keyword_and, .keyword_or => true,
+        .single_char => switch (token.char.?) {
+            '+', '-', '*', '/', '%', '^', '<', '>' => true,
+            else => false,
+        },
+        else => false,
+    };
+}
+
+pub const BinaryPriority = struct {
+    left: u8,
+    right: u8,
+};
+
+// TODO: move to Token?
+fn getBinaryPriority(token: Token) BinaryPriority {
+    return switch (token.id) {
+        .single_char => switch (token.char.?) {
+            '+', '-' => BinaryPriority{ .left = 6, .right = 6 },
+            '*', '/', '%' => BinaryPriority{ .left = 7, .right = 7 },
+            '^' => BinaryPriority{ .left = 10, .right = 9 },
+            '>', '<' => BinaryPriority{ .left = 3, .right = 3 },
+            else => unreachable,
+        },
+        .concat => BinaryPriority{ .left = 5, .right = 4 },
+        .eq, .ne, .le, .ge => BinaryPriority{ .left = 3, .right = 3 },
+        .keyword_and => BinaryPriority{ .left = 2, .right = 2 },
+        .keyword_or => BinaryPriority{ .left = 1, .right = 1 },
+        else => unreachable,
+    };
+}
 
 test "check hello world ast" {
     const allocator = std.testing.allocator;
@@ -1413,6 +1513,96 @@ test "table constructors" {
         \\    table_constructor
         \\   table_field
         \\    table_constructor
+        \\
+    );
+}
+
+test "operators" {
+    try testParse("a = #b",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  unary_expression #
+        \\   identifier
+        \\
+    );
+    try testParse("a = ###b",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  unary_expression #
+        \\   unary_expression #
+        \\    unary_expression #
+        \\     identifier
+        \\
+    );
+    try testParse("a = a+i < b/2+1",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  binary_expression <
+        \\   binary_expression +
+        \\    identifier
+        \\    identifier
+        \\   binary_expression +
+        \\    binary_expression /
+        \\     identifier
+        \\     literal <number>
+        \\    literal <number>
+        \\
+    );
+    try testParse("a = 5+x^2*8",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  binary_expression +
+        \\   literal <number>
+        \\   binary_expression *
+        \\    binary_expression ^
+        \\     identifier
+        \\     literal <number>
+        \\    literal <number>
+        \\
+    );
+    try testParse("a = a < y and y <= z",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  binary_expression and
+        \\   binary_expression <
+        \\    identifier
+        \\    identifier
+        \\   binary_expression <=
+        \\    identifier
+        \\    identifier
+        \\
+    );
+    try testParse("a = -x^2",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  unary_expression -
+        \\   binary_expression ^
+        \\    identifier
+        \\    literal <number>
+        \\
+    );
+    try testParse("a = x^y^z",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  binary_expression ^
+        \\   identifier
+        \\   binary_expression ^
+        \\    identifier
+        \\    identifier
         \\
     );
 }

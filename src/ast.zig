@@ -43,6 +43,8 @@ pub const Node = struct {
         function_declaration,
         table_constructor,
         table_field,
+        unary_expression,
+        binary_expression,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -65,6 +67,8 @@ pub const Node = struct {
                 .function_declaration => FunctionDeclaration,
                 .table_constructor => TableConstructor,
                 .table_field => TableField,
+                .unary_expression => UnaryExpression,
+                .binary_expression => BinaryExpression,
             };
         }
     };
@@ -192,6 +196,19 @@ pub const Node = struct {
         base: Node = .{ .id = .table_field },
         key: ?*Node,
         value: *Node,
+    };
+
+    pub const UnaryExpression = struct {
+        base: Node = .{ .id = .unary_expression },
+        operator: Token,
+        argument: *Node,
+    };
+
+    pub const BinaryExpression = struct {
+        base: Node = .{ .id = .binary_expression },
+        operator: Token,
+        left: *Node,
+        right: *Node,
     };
 
     pub fn dump(
@@ -390,6 +407,21 @@ pub const Node = struct {
                     try writer.writeAll("=\n");
                 }
                 try field.value.dump(writer, indent + 1);
+            },
+            .unary_expression => {
+                const unary = @fieldParentPtr(Node.UnaryExpression, "base", node);
+                try writer.writeAll(" ");
+                try writer.writeAll(unary.operator.nameForDisplay());
+                try writer.writeAll("\n");
+                try unary.argument.dump(writer, indent + 1);
+            },
+            .binary_expression => {
+                const binary = @fieldParentPtr(Node.BinaryExpression, "base", node);
+                try writer.writeAll(" ");
+                try writer.writeAll(binary.operator.nameForDisplay());
+                try writer.writeAll("\n");
+                try binary.left.dump(writer, indent + 1);
+                try binary.right.dump(writer, indent + 1);
             },
         }
     }

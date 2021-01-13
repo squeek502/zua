@@ -81,6 +81,7 @@ pub const Parser = struct {
         // TODO: islast
         // TODO: levels
         try self.block(&statements);
+        try self.check(.eof);
 
         const node = try self.arena.create(Node.Chunk);
         node.* = .{
@@ -1605,4 +1606,9 @@ test "operators" {
         \\    identifier
         \\
     );
+}
+
+test "errors" {
+    expectParseError(error.ExpectedDifferentToken, "untilû");
+    expectParseError(error.ExpectedDifferentToken, "until");
 }

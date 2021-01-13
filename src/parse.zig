@@ -499,6 +499,99 @@ pub const Parser = struct {
         return self.funcbody(&name.base, true);
     }
 
+    /// listfield -> expr
+    fn listfield(self: *Self) Error!*Node {
+        var value = try self.expr();
+        var node = try self.arena.create(Node.TableField);
+        node.* = .{
+            .key = null,
+            .value = value,
+        };
+        return &node.base;
+    }
+
+    /// recfield -> (NAME | `['exp1`]') = exp1
+    fn recfield(self: *Self) Error!*Node {
+        var key: *Node = get_key: {
+            if (self.token.id == .name) { // TODO checkname
+                // This might be kinda weird, but the name token here is actually used as
+                // more of a string literal, so create a Literal node instead of Identifier.
+                // This is a special case.
+                // TODO revisit this?
+                var name_node = try self.arena.create(Node.Literal);
+                name_node.* = .{
+                    .token = self.token,
+                };
+                self.token = try self.lexer.next();
+                break :get_key &name_node.base;
+            } else {
+                std.debug.assert(self.token.isChar('['));
+                self.token = try self.lexer.next(); // skip the [
+
+                const key_expr = try self.expr();
+
+                std.debug.assert(self.token.isChar(']')); // TODO checknext()
+                self.token = try self.lexer.next();
+
+                break :get_key key_expr;
+            }
+        };
+        std.debug.assert(self.token.isChar('=')); // TODO checknext()
+        self.token = try self.lexer.next();
+
+        const value = try self.expr();
+
+        var node = try self.arena.create(Node.TableField);
+        node.* = .{
+            .key = key,
+            .value = value,
+        };
+        return &node.base;
+    }
+
+    /// constructor -> ??
+    fn constructor(self: *Self) Error!*Node {
+        std.debug.assert(self.token.isChar('{')); // TODO checknext
+        self.token = try self.lexer.next();
+
+        var fields = std.ArrayList(*Node).init(self.allocator);
+        defer fields.deinit();
+
+        while (!self.token.isChar('}')) {
+            var field: *Node = get_field: {
+                switch (self.token.id) {
+                    .name => {
+                        // TODO presumably should catch EOF here and translate it to an appropriate error
+                        const lookahead_token = try self.lexer.lookahead();
+                        if (lookahead_token.isChar('=')) {
+                            break :get_field try self.recfield();
+                        } else {
+                            break :get_field try self.listfield();
+                        }
+                    },
+                    .single_char => switch (self.token.char.?) {
+                        '[' => break :get_field try self.recfield(),
+                        else => break :get_field try self.listfield(),
+                    },
+                    else => break :get_field try self.listfield(),
+                }
+            };
+            try fields.append(field);
+
+            const has_more = (try self.testcharnext(',')) or (try self.testcharnext(';'));
+            if (!has_more) break;
+        }
+
+        std.debug.assert(self.token.isChar('}')); // TODO check_match
+        self.token = try self.lexer.next();
+
+        var node = try self.arena.create(Node.TableConstructor);
+        node.* = .{
+            .fields = try self.arena.dupe(*Node, fields.items),
+        };
+        return &node.base;
+    }
+
     /// stat -> LOCAL NAME {`,' NAME} [`=' explist1]
     fn localstat(self: *Self) Error!*Node {
         return try self.assignment(null);
@@ -590,7 +683,7 @@ pub const Parser = struct {
             },
             .single_char => {
                 switch (self.token.char.?) {
-                    '{' => unreachable, // TODO constructor
+                    '{' => return self.constructor(),
                     else => {},
                 }
             },
@@ -671,11 +764,10 @@ pub const Parser = struct {
                             self.token = try self.lexer.next();
                             expression.node = try self.funcargs(expression.node);
                         },
-                        '(' => {
+                        '(', '{' => {
                             expression.node = try self.funcargs(expression.node);
                             expression.can_be_assigned_to = false;
                         },
-                        '{' => unreachable, // TODO table constructor
                         else => break :loop,
                     }
                 },
@@ -706,7 +798,10 @@ pub const Parser = struct {
                         return error.ExpectedCloseParen;
                     }
                 },
-                '{' => unreachable, // TODO table constructor call
+                '{' => {
+                    const node = try self.constructor();
+                    try arguments.append(node);
+                },
                 else => {
                     return error.FunctionArgumentsExpected;
                 },
@@ -878,6 +973,16 @@ test "function call" {
         \\    ()
         \\   ()
         \\  ()
+        \\
+    );
+    // table constructor
+    try testParse("a{}",
+        \\chunk
+        \\ call
+        \\  identifier
+        \\  (
+        \\   table_constructor
+        \\  )
         \\
     );
 }
@@ -1230,4 +1335,91 @@ test "assignment errors" {
     expectParseError(error.FunctionArgumentsExpected, "a:b = nil");
     expectParseError(error.SyntaxError, "(a)");
     expectParseError(error.UnexpectedSymbol, "true = nil");
+}
+
+test "table constructors" {
+    try testParse("a = {}",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  table_constructor
+        \\
+    );
+    try testParse("a = {1;nil,something}",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  table_constructor
+        \\   table_field
+        \\    literal <number>
+        \\   table_field
+        \\    literal nil
+        \\   table_field
+        \\    identifier
+        \\
+    );
+    try testParse("a = {b=true}",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  table_constructor
+        \\   table_field
+        \\    literal <name>
+        \\   =
+        \\    literal true
+        \\
+    );
+    try testParse("a = {[true]=1}",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  table_constructor
+        \\   table_field
+        \\    literal true
+        \\   =
+        \\    literal <number>
+        \\
+    );
+    try testParse("a = {[something]=1}",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  table_constructor
+        \\   table_field
+        \\    identifier
+        \\   =
+        \\    literal <number>
+        \\
+    );
+    try testParse("a = {[\"something\"]=1}",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  table_constructor
+        \\   table_field
+        \\    literal <string>
+        \\   =
+        \\    literal <number>
+        \\
+    );
+    try testParse("a = {[{}]={},{}}",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  table_constructor
+        \\   table_field
+        \\    table_constructor
+        \\   =
+        \\    table_constructor
+        \\   table_field
+        \\    table_constructor
+        \\
+    );
 }

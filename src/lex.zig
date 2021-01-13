@@ -733,10 +733,12 @@ pub const Lexer = struct {
         return result;
     }
 
-    pub fn lookahead(self: *Self) Token {
-        const lookaheadLexer = Lexer{
+    pub fn lookahead(self: *Self) LexError!Token {
+        var lookaheadLexer = Lexer{
             .buffer = self.buffer,
             .index = self.index,
+            .check_next_bug_compat = self.check_next_bug_compat,
+            .long_str_nesting_compat = self.long_str_nesting_compat,
         };
         return lookaheadLexer.next();
     }

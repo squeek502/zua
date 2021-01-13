@@ -41,6 +41,8 @@ pub const Node = struct {
         for_statement_numeric,
         for_statement_generic,
         function_declaration,
+        table_constructor,
+        table_field,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -61,6 +63,8 @@ pub const Node = struct {
                 .for_statement_numeric => ForStatementNumeric,
                 .for_statement_generic => ForStatementGeneric,
                 .function_declaration => FunctionDeclaration,
+                .table_constructor => TableConstructor,
+                .table_field => TableField,
             };
         }
     };
@@ -85,6 +89,8 @@ pub const Node = struct {
 
     pub const Literal = struct {
         base: Node = .{ .id = .literal },
+        /// Can be one of .keyword_nil, .keyword_true, .keyword_false, .number, .string, or .name
+        /// (.name is a special case that is only used for table constructor field keys)
         token: Token,
     };
 
@@ -175,6 +181,17 @@ pub const Node = struct {
         parameters: []Token,
         body: []*Node,
         is_local: bool,
+    };
+
+    pub const TableConstructor = struct {
+        base: Node = .{ .id = .table_constructor },
+        fields: []*Node,
+    };
+
+    pub const TableField = struct {
+        base: Node = .{ .id = .table_field },
+        key: ?*Node,
+        value: *Node,
     };
 
     pub fn dump(
@@ -356,6 +373,23 @@ pub const Node = struct {
                 for (func.body) |body_node| {
                     try body_node.dump(writer, indent + 2);
                 }
+            },
+            .table_constructor => {
+                const constructor = @fieldParentPtr(Node.TableConstructor, "base", node);
+                try writer.writeAll("\n");
+                for (constructor.fields) |field| {
+                    try field.dump(writer, indent + 1);
+                }
+            },
+            .table_field => {
+                const field = @fieldParentPtr(Node.TableField, "base", node);
+                try writer.writeAll("\n");
+                if (field.key) |key| {
+                    try key.dump(writer, indent + 1);
+                    try writer.writeByteNTimes(' ', indent);
+                    try writer.writeAll("=\n");
+                }
+                try field.value.dump(writer, indent + 1);
             },
         }
     }

@@ -56,6 +56,7 @@ pub const ParseError = error{
     SyntaxError,
     ExpectedDifferentToken, // error_expected in lparser.c
     TooManyLocalVariables,
+    NoLoopToBreak,
 };
 
 pub const Parser = struct {
@@ -65,6 +66,7 @@ pub const Parser = struct {
     token: Token,
     allocator: *Allocator,
     arena: *Allocator,
+    in_loop: bool = false,
 
     pub const Error = ParseError || Lexer.Error || Allocator.Error;
 
@@ -78,8 +80,6 @@ pub const Parser = struct {
         var statements = std.ArrayList(*Node).init(self.allocator);
         defer statements.deinit();
 
-        // TODO: islast
-        // TODO: levels
         try self.block(&statements);
         try self.check(.eof);
 
@@ -114,8 +114,13 @@ pub const Parser = struct {
 
     fn block(self: *Self, list: *std.ArrayList(*Node)) Error!void {
         while (!blockFollow(self.token)) {
-            try list.append(try self.statement());
+            const stat = try self.statement();
+            try list.append(stat);
             _ = try self.testcharnext(';');
+            const must_be_last_statement = stat.id == .return_statement or stat.id == .break_statement;
+            if (must_be_last_statement) {
+                break;
+            }
         }
     }
 
@@ -254,7 +259,10 @@ pub const Parser = struct {
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
 
+        const in_loop_prev = self.in_loop;
+        self.in_loop = true;
         try self.block(&body);
+        self.in_loop = in_loop_prev;
 
         try self.checknext(.keyword_end); // TODO check_match
 
@@ -270,6 +278,10 @@ pub const Parser = struct {
         std.debug.assert(self.token.id == .keyword_break);
         const break_token = self.token;
         self.token = try self.lexer.next();
+
+        if (!self.in_loop) {
+            return error.NoLoopToBreak;
+        }
 
         var break_statement = try self.arena.create(Node.BreakStatement);
         break_statement.* = .{
@@ -304,7 +316,10 @@ pub const Parser = struct {
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
 
+        const in_loop_prev = self.in_loop;
+        self.in_loop = true;
         try self.block(&body);
+        self.in_loop = in_loop_prev;
 
         try self.checknext(.keyword_until); // TODO: check_match
 
@@ -362,7 +377,10 @@ pub const Parser = struct {
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
 
+        const in_loop_prev = self.in_loop;
+        self.in_loop = true;
         try self.block(&body);
+        self.in_loop = in_loop_prev;
 
         var for_node = try self.arena.create(Node.ForStatementNumeric);
         for_node.* = .{
@@ -398,7 +416,10 @@ pub const Parser = struct {
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
 
+        const in_loop_prev = self.in_loop;
+        self.in_loop = true;
         try self.block(&body);
+        self.in_loop = in_loop_prev;
 
         var for_node = try self.arena.create(Node.ForStatementGeneric);
         for_node.* = .{
@@ -809,6 +830,8 @@ pub const Parser = struct {
         switch (self.token.id) {
             .single_char => switch (self.token.char.?) {
                 '(' => {
+                    // TODO ambiguous syntax (function call x new statement)
+                    // if ( is on different line from the func name expression
                     self.token = try self.lexer.next();
                     const has_no_arguments = self.token.isChar(')');
                     if (!has_no_arguments) {
@@ -1079,6 +1102,16 @@ test "function call" {
         \\  )
         \\
     );
+    // long string
+    try testParse("a[[string]]",
+        \\chunk
+        \\ call
+        \\  identifier
+        \\  (
+        \\   literal <string>
+        \\  )
+        \\
+    );
 }
 
 test "local statements" {
@@ -1266,9 +1299,50 @@ test "repeat statements" {
 }
 
 test "break statements" {
-    try testParse("break",
+    try testParse("for i=1,2 do break end",
         \\chunk
-        \\ break_statement
+        \\ for_statement_numeric
+        \\  literal <number>
+        \\  literal <number>
+        \\ do
+        \\  break_statement
+        \\
+    );
+    // break just needs to be at the end of its immediate block, so wrapping it in a `do end`
+    // allows you to put a break statement before the end of another block
+    try testParse("for i=1,2 do do break end print(\"dead\") end",
+        \\chunk
+        \\ for_statement_numeric
+        \\  literal <number>
+        \\  literal <number>
+        \\ do
+        \\  do_statement
+        \\   break_statement
+        \\  call
+        \\   identifier
+        \\   (
+        \\    literal <string>
+        \\   )
+        \\
+    );
+    // break in loop with nested loop
+    try testParse(
+        \\for i=1,2 do
+        \\  for j=1,2 do
+        \\  end
+        \\  break
+        \\end
+    ,
+        \\chunk
+        \\ for_statement_numeric
+        \\  literal <number>
+        \\  literal <number>
+        \\ do
+        \\  for_statement_numeric
+        \\   literal <number>
+        \\   literal <number>
+        \\  do
+        \\  break_statement
         \\
     );
 }
@@ -1611,4 +1685,14 @@ test "operators" {
 test "errors" {
     expectParseError(error.ExpectedDifferentToken, "untilû");
     expectParseError(error.ExpectedDifferentToken, "until");
+
+    // return and break must be the last statement in a block
+    expectParseError(error.ExpectedDifferentToken, "return; local a = 1");
+    expectParseError(error.ExpectedDifferentToken, "for i=1,2 do break; local a = 1 end");
+
+    // break must be in a loop
+    expectParseError(error.NoLoopToBreak, "break");
+
+    // TODO ambiguous syntax (function call x new statement)
+    // expectParseError(error.AmbiguousSyntax, "f\n()");
 }

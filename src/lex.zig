@@ -27,6 +27,7 @@ pub const Token = struct {
     id: Id,
     start: usize,
     end: usize,
+    line_number: usize,
     // for single-char tokens
     // TODO: figure out something better for this (it's only used for nameForDisplay)
     char: ?u8,
@@ -189,6 +190,7 @@ pub const Lexer = struct {
 
     buffer: []const u8,
     index: usize,
+    line_number: usize = 1,
 
     /// In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
     /// since \0 is technically in the string literal passed to check_next representing
@@ -220,7 +222,7 @@ pub const Lexer = struct {
     }
 
     pub fn dump(self: *Self, token: *const Token) void {
-        std.debug.warn("{} {} \"{}\"\n", .{ @tagName(token.id), token.nameForDisplay(), self.buffer[token.start..token.end] });
+        std.debug.warn("{} {}:{}: \"{e}\"\n", .{ @tagName(token.id), token.nameForDisplay(), token.line_number, self.buffer[token.start..token.end] });
     }
 
     const State = enum {
@@ -262,6 +264,7 @@ pub const Lexer = struct {
             .start = start_index,
             .end = undefined,
             .char = null,
+            .line_number = self.line_number,
         };
         var state = State.start;
         var string_delim: u8 = undefined;
@@ -270,6 +273,7 @@ pub const Lexer = struct {
         var string_escape_n: std.math.IntFittingRange(0, 999) = 0;
         var string_escape_i: std.math.IntFittingRange(0, 3) = 0;
         var string_escape_line_ending: u8 = undefined;
+        var last_line_ending_index: ?usize = null;
         var number_is_float: bool = false;
         var number_starting_char: u8 = undefined;
         var number_exponent_signed_char: ?u8 = null;
@@ -281,6 +285,7 @@ pub const Lexer = struct {
                 State.start => switch (c) {
                     '\n', '\r' => {
                         result.start = self.index + 1;
+                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
                     },
                     // space, tab, vertical tab, form feed
                     ' ', '\t', '\x0b', '\x0c' => {
@@ -368,6 +373,7 @@ pub const Lexer = struct {
                         }
                         state = State.string_literal_backslash_line_endings;
                         string_escape_line_ending = c;
+                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {
                         // if the escape sequence had any digits, then
@@ -387,6 +393,7 @@ pub const Lexer = struct {
                         } else {
                             state = State.string_literal;
                         }
+                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {
                         // backtrack so that we don't escape the current char
@@ -412,6 +419,7 @@ pub const Lexer = struct {
                         // comment immediately ends
                         result.start = self.index + 1;
                         state = State.start;
+                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {
                         state = State.short_comment;
@@ -432,6 +440,7 @@ pub const Lexer = struct {
                                 // not a long comment, but the short comment ends immediately
                                 result.start = self.index + 1;
                                 state = State.start;
+                                result.line_number = self.incrementLineNumber(&last_line_ending_index);
                             } else {
                                 state = State.short_comment;
                             }
@@ -492,6 +501,7 @@ pub const Lexer = struct {
                     '\n', '\r' => {
                         result.start = self.index + 1;
                         state = State.start;
+                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {},
                 },
@@ -737,10 +747,45 @@ pub const Lexer = struct {
         var lookaheadLexer = Lexer{
             .buffer = self.buffer,
             .index = self.index,
+            .line_number = self.line_number,
             .check_next_bug_compat = self.check_next_bug_compat,
             .long_str_nesting_compat = self.long_str_nesting_compat,
         };
         return lookaheadLexer.next();
+    }
+
+    /// Increments line_number appropriately (handling line ending pairs)
+    /// and returns the new line number.
+    /// note: mutates last_line_ending_index.*
+    fn incrementLineNumber(self: *Self, last_line_ending_index: *?usize) usize {
+        if (self.currentIndexFormsLineEndingPair(last_line_ending_index.*)) {
+            last_line_ending_index.* = null;
+        } else {
+            self.line_number += 1;
+            last_line_ending_index.* = self.index;
+        }
+        return self.line_number;
+    }
+
+    /// \r\n and \n\r pairs are treated as a single line ending (but not \r\r \n\n)
+    /// expects self.index and last_line_ending_index (if non-null) to contain line endings
+    fn currentIndexFormsLineEndingPair(self: *Self, last_line_ending_index: ?usize) bool {
+        if (last_line_ending_index == null) return false;
+
+        // must immediately precede the current index
+        if (last_line_ending_index.? != self.index - 1) return false;
+
+        const cur_line_ending = self.buffer[self.index];
+        const last_line_ending = self.buffer[last_line_ending_index.?];
+
+        // sanity check
+        std.debug.assert(cur_line_ending == '\r' or cur_line_ending == '\n');
+        std.debug.assert(last_line_ending == '\r' or last_line_ending == '\n');
+
+        // can't be \n\n or \r\r
+        if (last_line_ending == cur_line_ending) return false;
+
+        return true;
     }
 };
 
@@ -1014,6 +1059,45 @@ fn testLexInitialized(lexer: *Lexer, expected_tokens: []const Token.Id) !void {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);
         std.testing.expectEqual(expected_token_id, token.id);
+    }
+    const last_token = try lexer.next();
+    std.testing.expectEqual(Token.Id.eof, last_token.id);
+}
+
+test "line numbers" {
+    try testLexLineNumbers(
+        \\a
+        \\b
+        \\c
+    ,
+        &[_]TokenAndLineNumber{
+            .{ .id = Token.Id.name, .line_number = 1 },
+            .{ .id = Token.Id.name, .line_number = 2 },
+            .{ .id = Token.Id.name, .line_number = 3 },
+        },
+    );
+    try testLexLineNumbers("\n\n\na", &[_]TokenAndLineNumber{
+        .{ .id = Token.Id.name, .line_number = 4 },
+    });
+    // \r\n pair separated by a comment (which is not emmitted as a token)
+    try testLexLineNumbers("\r--comment\na", &[_]TokenAndLineNumber{
+        .{ .id = Token.Id.name, .line_number = 3 },
+    });
+}
+
+const TokenAndLineNumber = struct {
+    id: Token.Id,
+    line_number: usize,
+};
+
+fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineNumber) !void {
+    var lexer = Lexer.init(source);
+    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{lexer.buffer});
+    for (expected_tokens) |expected_token| {
+        const token = try lexer.next();
+        if (dumpTokensDuringTests) lexer.dump(&token);
+        std.testing.expectEqual(expected_token.id, token.id);
+        std.testing.expectEqual(expected_token.line_number, token.line_number);
     }
     const last_token = try lexer.next();
     std.testing.expectEqual(Token.Id.eof, last_token.id);

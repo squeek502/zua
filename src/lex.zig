@@ -1,4 +1,7 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
+const AutoComptimeLookup = @import("comptime_lookup.zig").AutoComptimeLookup;
+const zua = @import("zua.zig");
 
 // Notes:
 //
@@ -18,6 +21,17 @@ const std = @import("std");
 //
 // Lua's number lexing allows for using locale-specific decimal points
 // TODO: ?
+//
+// Zua's lexer error messages are almost entirely identical to Lua's, except in a few cases:
+// - malformed number in Lua prints more than where a number stops being valid, whereas Zua
+//   only prints up to the first malformed char (e.g. Zua will stop at 3.. whereas Lua will
+//   print 3.................)
+// - string token context in Lua prints the parsed string rather than the source of the string
+//   since Lua parses and lexes at the same time. Zua will print the source of the string instead.
+//   (e.g. for "\v Zua will print "\v whereas Lua would print an actual vertical tab character)
+// - escape sequence too large in Lua doesn't include the actual escape sequence that is too large,
+//   while Zua does include it (e.g. "\444" in Lua would error with: near '"', while Zua gives:
+//   near '"\444')
 
 // Debug/test output
 const dumpTokensDuringTests = false;
@@ -183,14 +197,26 @@ pub const LexError = error{
     EscapeSequenceTooLarge,
 };
 
+/// error -> msg lookup for lex errors
+pub const lex_error_strings = AutoComptimeLookup(LexError, []const u8, .{
+    .{ LexError.UnfinishedString, "unfinished string" },
+    .{ LexError.UnfinishedLongComment, "unfinished long comment" },
+    .{ LexError.UnfinishedLongString, "unfinished long string" },
+    .{ LexError.InvalidLongStringDelimiter, "invalid long string delimiter" },
+    .{ LexError.MalformedNumber, "malformed number" },
+    .{ LexError.EscapeSequenceTooLarge, "escape sequence too large" },
+});
+
 pub const LexerOptions = struct {};
 
 pub const Lexer = struct {
     const Self = @This();
 
+    chunk_name: []const u8,
     buffer: []const u8,
     index: usize,
     line_number: usize = 1,
+    error_buffer: std.ArrayList(u8),
 
     /// In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
     /// since \0 is technically in the string literal passed to check_next representing
@@ -212,13 +238,19 @@ pub const Lexer = struct {
     // for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
     long_str_nesting_compat: bool = false,
 
-    pub const Error = LexError;
+    pub const Error = LexError || Allocator.Error;
 
-    pub fn init(buffer: []const u8) Self {
+    pub fn init(buffer: []const u8, err_allocator: *Allocator, chunk_name: []const u8) Self {
         return Self{
             .buffer = buffer,
             .index = 0,
+            .error_buffer = std.ArrayList(u8).init(err_allocator),
+            .chunk_name = chunk_name,
         };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.error_buffer.deinit();
     }
 
     pub fn dump(self: *Self, token: *const Token) void {
@@ -250,7 +282,7 @@ pub const Lexer = struct {
         compound_equal,
     };
 
-    pub fn next(self: *Self) LexError!Token {
+    pub fn next(self: *Self) Error!Token {
         const start_index = self.index;
         if (veryVerboseLexing) {
             if (self.index < self.buffer.len) {
@@ -351,7 +383,9 @@ pub const Lexer = struct {
                             break;
                         }
                     },
-                    '\n', '\r' => return LexError.UnfinishedString,
+                    '\n', '\r' => {
+                        return self.reportLexError(LexError.UnfinishedString, result, Token.Id.string);
+                    },
                     else => {},
                 },
                 State.string_literal_backslash => switch (c) {
@@ -362,14 +396,14 @@ pub const Lexer = struct {
                         string_escape_i += 1;
                         if (string_escape_i == 3) {
                             if (string_escape_n > std.math.maxInt(u8)) {
-                                return LexError.EscapeSequenceTooLarge;
+                                return self.reportLexErrorInc(LexError.EscapeSequenceTooLarge, result, Token.Id.string);
                             }
                             state = State.string_literal;
                         }
                     },
                     '\r', '\n' => {
                         if (string_escape_i > 0) {
-                            return LexError.UnfinishedString;
+                            return self.reportLexError(LexError.UnfinishedString, result, Token.Id.string);
                         }
                         state = State.string_literal_backslash_line_endings;
                         string_escape_line_ending = c;
@@ -389,7 +423,7 @@ pub const Lexer = struct {
                     '\r', '\n' => {
                         // can only escape \r\n or \n\r pairs, not \r\r or \n\n
                         if (c == string_escape_line_ending) {
-                            return LexError.UnfinishedString;
+                            return self.reportLexError(LexError.UnfinishedString, result, Token.Id.string);
                         } else {
                             state = State.string_literal;
                         }
@@ -456,7 +490,7 @@ pub const Lexer = struct {
                             // - Long strings with no sep chars is unaffected: [X does not give this error
                             //   (instead it will an give unexpected symbol error while parsing)
                             if (expected_string_level > 0) {
-                                return LexError.InvalidLongStringDelimiter;
+                                return self.reportLexError(LexError.InvalidLongStringDelimiter, result, Token.Id.string);
                             } else {
                                 result.id = Token.Id.single_char;
                                 break;
@@ -471,7 +505,9 @@ pub const Lexer = struct {
                         state = if (state == State.long_comment) State.long_comment_possible_end else State.long_string_possible_end;
                         string_level = 0;
                     },
-                    else => {},
+                    else => {
+                        _ = self.maybeIncrementLineNumber(&last_line_ending_index);
+                    },
                 },
                 State.long_string_possible_end,
                 State.long_comment_possible_end,
@@ -494,6 +530,7 @@ pub const Lexer = struct {
                         string_level += 1;
                     },
                     else => {
+                        _ = self.maybeIncrementLineNumber(&last_line_ending_index);
                         state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
                     },
                 },
@@ -550,14 +587,14 @@ pub const Lexer = struct {
                     '.' => {
                         // multiple decimal points not allowed
                         if (number_is_float) {
-                            return LexError.MalformedNumber;
+                            return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number);
                         }
                         number_is_float = true;
                     },
                     'x', 'X' => {
                         // only 0x is allowed
                         if (number_starting_char != '0') {
-                            return LexError.MalformedNumber;
+                            return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number);
                         }
                         state = State.number_hex_start;
                     },
@@ -567,9 +604,9 @@ pub const Lexer = struct {
                     },
                     // 'a'...'z' minus e and x
                     'a'...'d', 'A'...'D', 'f'...'w', 'F'...'W', 'y'...'z', 'Y'...'Z' => {
-                        return LexError.MalformedNumber;
+                        return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number);
                     },
-                    '_' => return LexError.MalformedNumber,
+                    '_' => return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number),
                     else => {
                         if (self.check_next_bug_compat and c == '\x00') {
                             state = State.number_exponent_start;
@@ -586,9 +623,9 @@ pub const Lexer = struct {
                         state = State.number_hex;
                     },
                     'g'...'z', 'G'...'Z' => {
-                        return LexError.MalformedNumber;
+                        return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number);
                     },
-                    '_' => return LexError.MalformedNumber,
+                    '_' => return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number),
                     else => {
                         result.id = Token.Id.number;
                         break;
@@ -613,7 +650,7 @@ pub const Lexer = struct {
                                 if (number_exponent_signed_char) |_| {
                                     // this is an error because e.g. "1e--" would lex as "1e-" and "-"
                                     // and "1e-" is always invalid
-                                    return LexError.MalformedNumber;
+                                    return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number);
                                 }
                                 number_exponent_signed_char = c;
                             },
@@ -621,7 +658,7 @@ pub const Lexer = struct {
                                 // if we get here, then the token up to this point has to be
                                 // either 1e, 1e-, 1e+ which *must* be followed by a digit, and
                                 // we already know c is not a digit
-                                return LexError.MalformedNumber;
+                                return self.reportLexErrorInc(LexError.MalformedNumber, result, Token.Id.number);
                             },
                         }
                     }
@@ -639,7 +676,7 @@ pub const Lexer = struct {
                     } else {
                         switch (c) {
                             '0'...'9' => {},
-                            'a'...'z', 'A'...'Z', '_' => return LexError.MalformedNumber,
+                            'a'...'z', 'A'...'Z', '_' => return self.reportLexError(LexError.MalformedNumber, result, Token.Id.number),
                             else => {
                                 result.id = Token.Id.number;
                                 break;
@@ -666,8 +703,9 @@ pub const Lexer = struct {
                 },
             }
         } else {
-            // this will always be true due to the while loop condition
-            // as the else block is only evaluated after a break; in the while loop
+            // this will always be true due to the while loop condition as the
+            // else block is not evaluated after a break; in the while loop, but
+            // rather only when the loop condition fails
             std.debug.assert(self.index == self.buffer.len);
             switch (state) {
                 State.start => {},
@@ -700,28 +738,33 @@ pub const Lexer = struct {
                 },
                 State.long_string_start => {
                     if (expected_string_level > 0) {
-                        return LexError.InvalidLongStringDelimiter;
+                        return self.reportLexError(LexError.InvalidLongStringDelimiter, result, Token.Id.string);
                     } else {
                         result.id = Token.Id.single_char;
                     }
                 },
+                // .eof is reported as the error context to conform with how PUC Lua reports unfinished <x> errors
+                // when the end of the buffer is reached before the string is closed. Not totally sure why .string
+                // isn't used for the unfinished string errors in this case, though--the error message seems nicer
+                // that way
+                // TODO revisit?
                 State.long_comment_possible_end,
                 State.long_comment,
-                => return LexError.UnfinishedLongComment,
+                => return self.reportLexError(LexError.UnfinishedLongComment, result, Token.Id.eof),
                 State.long_string_possible_end,
                 State.long_string,
-                => return LexError.UnfinishedLongString,
+                => return self.reportLexError(LexError.UnfinishedLongString, result, Token.Id.eof),
                 State.string_literal,
                 State.string_literal_backslash,
                 State.string_literal_backslash_line_endings,
-                => return LexError.UnfinishedString,
+                => return self.reportLexError(LexError.UnfinishedString, result, Token.Id.eof),
                 State.number_hex_start,
                 State.number_exponent_start,
                 => {
                     if (self.check_next_bug_compat and number_is_null_terminated) {
                         result.id = Token.Id.number;
                     } else {
-                        return LexError.MalformedNumber;
+                        return self.reportLexError(LexError.MalformedNumber, result, Token.Id.number);
                     }
                 },
             }
@@ -743,15 +786,54 @@ pub const Lexer = struct {
         return result;
     }
 
-    pub fn lookahead(self: *Self) LexError!Token {
+    pub fn lookahead(self: *Self) Error!Token {
         var lookaheadLexer = Lexer{
             .buffer = self.buffer,
             .index = self.index,
             .line_number = self.line_number,
+            .chunk_name = self.chunk_name,
+            .error_buffer = self.error_buffer,
             .check_next_bug_compat = self.check_next_bug_compat,
             .long_str_nesting_compat = self.long_str_nesting_compat,
         };
         return lookaheadLexer.next();
+    }
+
+    fn reportLexError(self: *Self, err: LexError, token: ?Token, id: Token.Id) Error {
+        var fixed_up_token = token;
+        if (fixed_up_token) |*tok| {
+            tok.*.id = id;
+        }
+        const looked_up_msg = lex_error_strings.get(err).?;
+        const error_writer = self.error_buffer.writer();
+        var chunk_id_buf: [512]u8 = undefined;
+        const chunk_id = zua.object.getChunkId(self.chunk_name, &chunk_id_buf);
+        try error_writer.print("{}:{}: {}", .{ chunk_id, self.line_number, looked_up_msg });
+        if (fixed_up_token) |tok| {
+            try error_writer.print(" near '{}'", .{self.formatUnfinishedTokenForErrorDisplay(tok)});
+        }
+        return err;
+    }
+
+    fn reportLexErrorInc(self: *Self, err: LexError, token: ?Token, id: Token.Id) Error {
+        self.index += 1;
+        return self.reportLexError(err, token, id);
+    }
+
+    pub fn formatUnfinishedTokenForErrorDisplay(self: *Self, token: Token) []const u8 {
+        return switch (token.id) {
+            .name, .string, .number => self.buffer[token.start..self.index],
+            else => token.nameForDisplay(),
+        };
+    }
+
+    /// Like incrementLineNumber but checks that the current char is a line ending first
+    fn maybeIncrementLineNumber(self: *Self, last_line_ending_index: *?usize) usize {
+        const c = self.buffer[self.index];
+        if (c == '\r' or c == '\n') {
+            return self.incrementLineNumber(last_line_ending_index);
+        }
+        return self.line_number;
     }
 
     /// Increments line_number appropriately (handling line ending pairs)
@@ -764,6 +846,7 @@ pub const Lexer = struct {
             self.line_number += 1;
             last_line_ending_index.* = self.index;
         }
+        // TODO chunk has too many lines
         return self.line_number;
     }
 
@@ -1037,18 +1120,21 @@ fn expectLexError(expected: LexError, actual: anytype) void {
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
-    var lexer = Lexer.init(source);
+    var lexer = Lexer.init(source, std.testing.allocator, source);
+    defer lexer.deinit();
     return testLexInitialized(&lexer, expected_tokens);
 }
 
 fn testLexCheckNextBugCompat(source: []const u8, expected_tokens: []const Token.Id) !void {
-    var lexer = Lexer.init(source);
+    var lexer = Lexer.init(source, std.testing.allocator, source);
+    defer lexer.deinit();
     lexer.check_next_bug_compat = true;
     return testLexInitialized(&lexer, expected_tokens);
 }
 
 fn testLexNoCheckNextBugCompat(source: []const u8, expected_tokens: []const Token.Id) !void {
-    var lexer = Lexer.init(source);
+    var lexer = Lexer.init(source, std.testing.allocator, source);
+    defer lexer.deinit();
     lexer.check_next_bug_compat = false;
     return testLexInitialized(&lexer, expected_tokens);
 }
@@ -1079,7 +1165,7 @@ test "line numbers" {
     try testLexLineNumbers("\n\n\na", &[_]TokenAndLineNumber{
         .{ .id = Token.Id.name, .line_number = 4 },
     });
-    // \r\n pair separated by a comment (which is not emmitted as a token)
+    // \r\n pair separated by a comment
     try testLexLineNumbers("\r--comment\na", &[_]TokenAndLineNumber{
         .{ .id = Token.Id.name, .line_number = 3 },
     });
@@ -1091,7 +1177,8 @@ const TokenAndLineNumber = struct {
 };
 
 fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineNumber) !void {
-    var lexer = Lexer.init(source);
+    var lexer = Lexer.init(source, std.testing.allocator, source);
+    defer lexer.deinit();
     if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{lexer.buffer});
     for (expected_tokens) |expected_token| {
         const token = try lexer.next();

@@ -169,3 +169,79 @@ pub const Constant = union(Constant.Type) {
 
     pub const Map = std.HashMap(Constant, usize, Constant.hash, Constant.eql, std.hash_map.DefaultMaxLoadPercentage);
 };
+
+/// Turns a 'source' string into a chunk id for display in errors, etc.
+/// Assumes the buffer is appropriately sized, but especially when the source
+/// is prefixed by = (otherwise the source will be truncated accordingly,
+/// but will still require a minimum buffer length of 14).
+/// TODO: this was in lobject.c in Lua, but it's a pretty weird place for it
+pub fn getChunkId(source: []const u8, buf: []u8) []u8 {
+    var end_pos: usize = buf.len;
+    switch (source[0]) {
+        '=' => {
+            // remove first char
+            std.mem.copy(u8, buf, source[1..]);
+            end_pos = source.len - 1;
+        },
+        '@' => {
+            var source_for_display = source[1..]; // skip the @
+            const ellipsis = "...";
+            const max_truncated_len = buf.len - ellipsis.len;
+            var buf_index: usize = 0;
+            if (source_for_display.len > max_truncated_len) {
+                const source_start_index = source_for_display.len - max_truncated_len;
+                source_for_display = source_for_display[source_start_index..];
+                std.mem.copy(u8, buf, ellipsis);
+                buf_index += ellipsis.len;
+            }
+            std.mem.copy(u8, buf[buf_index..], source_for_display);
+            end_pos = buf_index + source_for_display.len;
+        },
+        else => {
+            const first_newline_index = std.mem.indexOfAny(u8, source, "\r\n");
+            var source_for_display: []const u8 = if (first_newline_index != null) source[0..first_newline_index.?] else source;
+            const prefix = "[string \"";
+            const suffix = "\"]";
+            const ellipsis = "...";
+            const min_display_len = prefix.len + ellipsis.len + suffix.len;
+            const max_source_len = buf.len - min_display_len;
+            const needed_truncation = source_for_display.len > max_source_len;
+            if (needed_truncation) {
+                source_for_display.len = max_source_len;
+            }
+
+            var fbs = std.io.fixedBufferStream(buf);
+            var writer = fbs.writer();
+            writer.writeAll(prefix) catch unreachable;
+            writer.writeAll(source_for_display) catch unreachable;
+            if (needed_truncation) {
+                writer.writeAll(ellipsis) catch unreachable;
+            }
+            writer.writeAll(suffix) catch unreachable;
+            end_pos = fbs.getPos() catch unreachable;
+        },
+    }
+    return buf[0..end_pos];
+}
+
+test "getChunkId" {
+    var buf: [50]u8 = undefined;
+    std.testing.expectEqualStrings("something", getChunkId("=something", &buf));
+
+    std.testing.expectEqualStrings("something", getChunkId("@something", &buf));
+    std.testing.expectEqualStrings(
+        ".../is/long/enough/to/actually/need/truncation.lua",
+        getChunkId("@something/that/is/long/enough/to/actually/need/truncation.lua", &buf),
+    );
+
+    std.testing.expectEqualStrings("[string \"something\"]", getChunkId("something", &buf));
+    std.testing.expectEqualStrings("[string \"some\"]", getChunkId("some\nthing", &buf));
+    std.testing.expectEqualStrings("[string \"some\"]", getChunkId("some\rthing", &buf));
+    std.testing.expectEqualStrings(
+        "[string \"something that is long enough to act...\"]",
+        getChunkId("something that is long enough to actually need truncation", &buf),
+    );
+
+    var min_buf: [14]u8 = undefined;
+    std.testing.expectEqualStrings("[string \"...\"]", getChunkId("anything", &min_buf));
+}

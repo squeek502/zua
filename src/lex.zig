@@ -804,7 +804,8 @@ pub const Lexer = struct {
         fixed_up_token.id = id;
         const looked_up_msg = lex_error_strings.get(err).?;
         const error_writer = self.error_buffer.writer();
-        var chunk_id_buf: [512]u8 = undefined;
+        const MAXSRC = 80; // see MAXSRC in llex.c
+        var chunk_id_buf: [MAXSRC]u8 = undefined;
         const chunk_id = zua.object.getChunkId(self.chunk_name, &chunk_id_buf);
         try error_writer.print("{}:{}: {}", .{ chunk_id, self.line_number, looked_up_msg });
         // TODO I think Lua doesn't print this is the token is single_char \0, need to confirm that though

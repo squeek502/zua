@@ -799,23 +799,20 @@ pub const Lexer = struct {
         return lookaheadLexer.next();
     }
 
-    fn reportLexError(self: *Self, err: LexError, token: ?Token, id: Token.Id) Error {
+    fn reportLexError(self: *Self, err: LexError, token: Token, id: Token.Id) Error {
         var fixed_up_token = token;
-        if (fixed_up_token) |*tok| {
-            tok.*.id = id;
-        }
+        fixed_up_token.id = id;
         const looked_up_msg = lex_error_strings.get(err).?;
         const error_writer = self.error_buffer.writer();
         var chunk_id_buf: [512]u8 = undefined;
         const chunk_id = zua.object.getChunkId(self.chunk_name, &chunk_id_buf);
         try error_writer.print("{}:{}: {}", .{ chunk_id, self.line_number, looked_up_msg });
-        if (fixed_up_token) |tok| {
-            try error_writer.print(" near '{}'", .{self.formatUnfinishedTokenForErrorDisplay(tok)});
-        }
+        // TODO I think Lua doesn't print this is the token is single_char \0, need to confirm that though
+        try error_writer.print(" near '{}'", .{self.formatUnfinishedTokenForErrorDisplay(fixed_up_token)});
         return err;
     }
 
-    fn reportLexErrorInc(self: *Self, err: LexError, token: ?Token, id: Token.Id) Error {
+    fn reportLexErrorInc(self: *Self, err: LexError, token: Token, id: Token.Id) Error {
         self.index += 1;
         return self.reportLexError(err, token, id);
     }

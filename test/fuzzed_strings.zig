@@ -48,7 +48,8 @@ test "string input/output pairs" {
         const expectedContents = try std.fs.cwd().readFileAlloc(allocator, path_buffer.span(), std.math.maxInt(usize));
         defer allocator.free(expectedContents);
 
-        var lexer = lex.Lexer.init(contents);
+        var lexer = lex.Lexer.init(contents, allocator, "fuzz");
+        defer lexer.deinit();
         while (true) {
             const token = lexer.next() catch |e| {
                 break;

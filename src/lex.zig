@@ -187,7 +187,12 @@ pub const Token = struct {
         };
     }
 
-    pub fn formatForErrorDisplay(self: *const Token, source: []const u8) []const u8 {
+    /// Intended to be equivalent to Lua's txtToken (llex.c) function
+    ///
+    /// NOTE: The slice returned should be considered temporary, and either copied
+    ///       or otherwise used immediately. See also nameForDisplay, which this function
+    ///       can call.
+    pub fn nameForErrorDisplay(self: *const Token, source: []const u8) []const u8 {
         return switch (self.id) {
             .name, .string, .number => source[self.start..self.end],
             else => self.nameForDisplay(),
@@ -202,6 +207,8 @@ pub const LexError = error{
     InvalidLongStringDelimiter,
     MalformedNumber,
     EscapeSequenceTooLarge,
+    ChunkHasTooManyLines,
+    LexicalElementTooLong,
 };
 
 /// error -> msg lookup for lex errors
@@ -212,6 +219,8 @@ pub const lex_error_strings = AutoComptimeLookup(LexError, []const u8, .{
     .{ LexError.InvalidLongStringDelimiter, "invalid long string delimiter" },
     .{ LexError.MalformedNumber, "malformed number" },
     .{ LexError.EscapeSequenceTooLarge, "escape sequence too large" },
+    .{ LexError.ChunkHasTooManyLines, "chunk has too many lines" },
+    .{ LexError.LexicalElementTooLong, "lexical element too long" },
 });
 
 pub const LexErrorContext = struct {
@@ -229,8 +238,10 @@ pub const LexErrorContext = struct {
         var chunk_id_buf: [MAXSRC]u8 = undefined;
         const chunk_id = zua.object.getChunkId(lexer.chunk_name, &chunk_id_buf);
         try error_writer.print("{s}:{d}: {s}", .{ chunk_id, self.token.line_number, looked_up_msg });
-        // TODO I think Lua doesn't print this is the token is single_char \0, need to confirm that though
-        try error_writer.print(" near '{s}'", .{self.token.formatForErrorDisplay(lexer.buffer)});
+        // special case errors that shouldn't be printed with context
+        if (self.err != LexError.ChunkHasTooManyLines and self.err != LexError.LexicalElementTooLong) {
+            try error_writer.print(" near '{s}'", .{self.token.nameForErrorDisplay(lexer.buffer)});
+        }
         return buffer.toOwnedSlice();
     }
 };
@@ -267,6 +278,16 @@ pub const Lexer = struct {
     // TODO: implement or ignore this (options for handling nesting of [[]] in multiline strings)
     // for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
     long_str_nesting_compat: bool = false,
+
+    /// maximum number of allowable lines in a chunk
+    /// Lua uses MAX_INT from llimits.h which is set to INT_MAX-2
+    /// This is the equivalent of that.
+    max_lines: usize = std.math.maxInt(i32) - 2,
+
+    /// maximum size of a lexical element
+    /// Lua uses MAX_SIZET/2 where MAX_SIZET is from llimits.h and is set to (~(size_t)0)-2)
+    /// This is the equivalent of that.
+    max_lexical_element_size: usize = (std.math.maxInt(usize) - 2) / 2,
 
     pub const Error = LexError;
 
@@ -338,11 +359,15 @@ pub const Lexer = struct {
         while (self.index < self.buffer.len) : (self.index += 1) {
             const c = self.buffer[self.index];
             if (veryVerboseLexing) std.debug.warn(":{s}", .{@tagName(state)});
+            // Check for tokens that are over the size limit here as a catch-all
+            if (self.index - result.start >= self.max_lexical_element_size) {
+                return self.reportLexError(LexError.LexicalElementTooLong, result, Token.Id.eof);
+            }
             switch (state) {
                 State.start => switch (c) {
                     '\n', '\r' => {
                         result.start = self.index + 1;
-                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
+                        result.line_number = try self.incrementLineNumber(&last_line_ending_index);
                     },
                     // space, tab, vertical tab, form feed
                     ' ', '\t', '\x0b', '\x0c' => {
@@ -432,7 +457,7 @@ pub const Lexer = struct {
                         }
                         state = State.string_literal_backslash_line_endings;
                         string_escape_line_ending = c;
-                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
+                        result.line_number = try self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {
                         // if the escape sequence had any digits, then
@@ -452,7 +477,7 @@ pub const Lexer = struct {
                         } else {
                             state = State.string_literal;
                         }
-                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
+                        result.line_number = try self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {
                         // backtrack so that we don't escape the current char
@@ -478,7 +503,7 @@ pub const Lexer = struct {
                         // comment immediately ends
                         result.start = self.index + 1;
                         state = State.start;
-                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
+                        result.line_number = try self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {
                         state = State.short_comment;
@@ -499,7 +524,7 @@ pub const Lexer = struct {
                                 // not a long comment, but the short comment ends immediately
                                 result.start = self.index + 1;
                                 state = State.start;
-                                result.line_number = self.incrementLineNumber(&last_line_ending_index);
+                                result.line_number = try self.incrementLineNumber(&last_line_ending_index);
                             } else {
                                 state = State.short_comment;
                             }
@@ -531,7 +556,7 @@ pub const Lexer = struct {
                         string_level = 0;
                     },
                     else => {
-                        _ = self.maybeIncrementLineNumber(&last_line_ending_index);
+                        _ = try self.maybeIncrementLineNumber(&last_line_ending_index);
                     },
                 },
                 State.long_string_possible_end,
@@ -555,7 +580,7 @@ pub const Lexer = struct {
                         string_level += 1;
                     },
                     else => {
-                        _ = self.maybeIncrementLineNumber(&last_line_ending_index);
+                        _ = try self.maybeIncrementLineNumber(&last_line_ending_index);
                         state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
                     },
                 },
@@ -563,7 +588,7 @@ pub const Lexer = struct {
                     '\n', '\r' => {
                         result.start = self.index + 1;
                         state = State.start;
-                        result.line_number = self.incrementLineNumber(&last_line_ending_index);
+                        result.line_number = try self.incrementLineNumber(&last_line_ending_index);
                     },
                     else => {},
                 },
@@ -847,10 +872,10 @@ pub const Lexer = struct {
     }
 
     /// Like incrementLineNumber but checks that the current char is a line ending first
-    fn maybeIncrementLineNumber(self: *Self, last_line_ending_index: *?usize) usize {
+    fn maybeIncrementLineNumber(self: *Self, last_line_ending_index: *?usize) !usize {
         const c = self.buffer[self.index];
         if (c == '\r' or c == '\n') {
-            return self.incrementLineNumber(last_line_ending_index);
+            return try self.incrementLineNumber(last_line_ending_index);
         }
         return self.line_number;
     }
@@ -858,14 +883,23 @@ pub const Lexer = struct {
     /// Increments line_number appropriately (handling line ending pairs)
     /// and returns the new line number.
     /// note: mutates last_line_ending_index.*
-    fn incrementLineNumber(self: *Self, last_line_ending_index: *?usize) usize {
+    fn incrementLineNumber(self: *Self, last_line_ending_index: *?usize) !usize {
         if (self.currentIndexFormsLineEndingPair(last_line_ending_index.*)) {
             last_line_ending_index.* = null;
         } else {
             self.line_number += 1;
             last_line_ending_index.* = self.index;
         }
-        // TODO chunk has too many lines
+        if (self.line_number >= self.max_lines) {
+            // TODO using a dummy token here is pretty janky
+            return self.reportLexError(LexError.ChunkHasTooManyLines, .{
+                .id = undefined,
+                .start = self.index,
+                .end = self.index,
+                .line_number = self.line_number,
+                .char = null,
+            }, Token.Id.eof);
+        }
         return self.line_number;
     }
 
@@ -1203,4 +1237,53 @@ fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineN
     }
     const last_token = try lexer.next();
     std.testing.expectEqual(Token.Id.eof, last_token.id);
+}
+
+test "chunk has too many lines" {
+    var max_lines_lexer = Lexer.init("\n\n\n\n\n", "max_lines");
+    // reduce the limit to something manageable so we don't have to test with a giant file
+    max_lines_lexer.max_lines = 4;
+
+    while (true) {
+        const token = max_lines_lexer.next() catch |err| {
+            std.testing.expectEqual(LexError.ChunkHasTooManyLines, err);
+            const err_msg = try max_lines_lexer.renderErrorAlloc(std.testing.allocator);
+            defer std.testing.allocator.free(err_msg);
+            std.testing.expectEqualStrings(
+                "[string \"max_lines\"]:4: chunk has too many lines",
+                err_msg,
+            );
+            break;
+        };
+        if (token.id == Token.Id.eof) {
+            unreachable;
+        }
+    }
+}
+
+test "lexical element too long" {
+    var max_size_lexer = Lexer.init(
+        \\this.is.ok.since.each.is.sep.token
+        \\"but next" .. "line is"
+        \\one_too_many
+        \\
+    , "max_size");
+    // reduce the limit to something manageable so we don't have to test with a giant file
+    max_size_lexer.max_lexical_element_size = 11;
+
+    while (true) {
+        const token = max_size_lexer.next() catch |err| {
+            std.testing.expectEqual(LexError.LexicalElementTooLong, err);
+            const err_msg = try max_size_lexer.renderErrorAlloc(std.testing.allocator);
+            defer std.testing.allocator.free(err_msg);
+            std.testing.expectEqualStrings(
+                "[string \"max_size\"]:3: lexical element too long",
+                err_msg,
+            );
+            break;
+        };
+        if (token.id == Token.Id.eof) {
+            unreachable;
+        }
+    }
 }

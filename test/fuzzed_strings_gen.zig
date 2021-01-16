@@ -31,7 +31,8 @@ pub fn main() !void {
 
     var walker = try std.fs.walkPath(allocator, inputs_dir);
     defer walker.deinit();
-    var path_buffer = try std.ArrayListSentineled(u8, 0).init(allocator, outputs_dir);
+    var path_buffer = try std.ArrayList(u8).initCapacity(allocator, outputs_dir.len);
+    path_buffer.appendSliceAssumeCapacity(outputs_dir);
     defer path_buffer.deinit();
     var result_buffer: [1024 * 1024]u8 = undefined;
 
@@ -49,12 +50,12 @@ pub fn main() !void {
             if (token.id == lex.Token.Id.eof) break;
             if (token.id != lex.Token.Id.string) continue;
 
-            path_buffer.shrink(outputs_dir.len);
+            path_buffer.shrinkRetainingCapacity(outputs_dir.len);
             try path_buffer.append(std.fs.path.sep);
-            var buffer_out_stream = path_buffer.outStream();
-            try buffer_out_stream.print("{}", .{n});
+            var buffer_writer = path_buffer.writer();
+            try buffer_writer.print("{}", .{n});
 
-            try std.fs.cwd().writeFile(path_buffer.span(), contents[token.start..token.end]);
+            try std.fs.cwd().writeFile(path_buffer.items, contents[token.start..token.end]);
 
             n += 1;
             if (n % 100 == 0) {
@@ -62,5 +63,5 @@ pub fn main() !void {
             }
         }
     }
-    std.debug.warn("{} files written to '{}'\n", .{ n, outputs_dir });
+    std.debug.warn("{} files written to '{s}'\n", .{ n, outputs_dir });
 }

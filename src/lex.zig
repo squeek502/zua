@@ -216,6 +216,9 @@ pub const Lexer = struct {
     buffer: []const u8,
     index: usize,
     line_number: usize = 1,
+    // TODO change to a struct that holds all the necessary info to create the
+    // error string, but have an e.g. renderAlloc function to actually construct
+    // the error message, that way Lexer doesn't have to take an allocator at all.
     error_buffer: std.ArrayList(u8),
 
     /// In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
@@ -254,7 +257,7 @@ pub const Lexer = struct {
     }
 
     pub fn dump(self: *Self, token: *const Token) void {
-        std.debug.warn("{} {}:{}: \"{e}\"\n", .{ @tagName(token.id), token.nameForDisplay(), token.line_number, self.buffer[token.start..token.end] });
+        std.debug.warn("{s} {s}:{d}: \"{e}\"\n", .{ @tagName(token.id), token.nameForDisplay(), token.line_number, self.buffer[token.start..token.end] });
     }
 
     const State = enum {
@@ -286,7 +289,7 @@ pub const Lexer = struct {
         const start_index = self.index;
         if (veryVerboseLexing) {
             if (self.index < self.buffer.len) {
-                std.debug.warn("{}:'{c}'", .{ self.index, self.buffer[self.index] });
+                std.debug.warn("{d}:'{c}'", .{ self.index, self.buffer[self.index] });
             } else {
                 std.debug.warn("eof", .{});
             }
@@ -312,7 +315,7 @@ pub const Lexer = struct {
         var number_is_null_terminated: bool = false;
         while (self.index < self.buffer.len) : (self.index += 1) {
             const c = self.buffer[self.index];
-            if (veryVerboseLexing) std.debug.warn(":{}", .{@tagName(state)});
+            if (veryVerboseLexing) std.debug.warn(":{s}", .{@tagName(state)});
             switch (state) {
                 State.start => switch (c) {
                     '\n', '\r' => {
@@ -772,9 +775,9 @@ pub const Lexer = struct {
 
         if (veryVerboseLexing) {
             if (self.index < self.buffer.len) {
-                std.debug.warn(":{}:'{c}'=\"{}\"\n", .{ self.index, self.buffer[self.index], self.buffer[result.start..self.index] });
+                std.debug.warn(":{d}:'{c}'=\"{s}\"\n", .{ self.index, self.buffer[self.index], self.buffer[result.start..self.index] });
             } else {
-                std.debug.warn(":eof=\"{}\"\n", .{self.buffer[result.start..self.index]});
+                std.debug.warn(":eof=\"{s}\"\n", .{self.buffer[result.start..self.index]});
             }
         }
 
@@ -807,9 +810,9 @@ pub const Lexer = struct {
         const MAXSRC = 80; // see MAXSRC in llex.c
         var chunk_id_buf: [MAXSRC]u8 = undefined;
         const chunk_id = zua.object.getChunkId(self.chunk_name, &chunk_id_buf);
-        try error_writer.print("{}:{}: {}", .{ chunk_id, self.line_number, looked_up_msg });
+        try error_writer.print("{s}:{d}: {s}", .{ chunk_id, self.line_number, looked_up_msg });
         // TODO I think Lua doesn't print this is the token is single_char \0, need to confirm that though
-        try error_writer.print(" near '{}'", .{self.formatUnfinishedTokenForErrorDisplay(fixed_up_token)});
+        try error_writer.print(" near '{s}'", .{self.formatUnfinishedTokenForErrorDisplay(fixed_up_token)});
         return err;
     }
 
@@ -1138,7 +1141,7 @@ fn testLexNoCheckNextBugCompat(source: []const u8, expected_tokens: []const Toke
 }
 
 fn testLexInitialized(lexer: *Lexer, expected_tokens: []const Token.Id) !void {
-    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{lexer.buffer});
+    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{s}\n----------------------\n", .{lexer.buffer});
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);
@@ -1177,7 +1180,7 @@ const TokenAndLineNumber = struct {
 fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineNumber) !void {
     var lexer = Lexer.init(source, std.testing.allocator, source);
     defer lexer.deinit();
-    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{}\n----------------------\n", .{lexer.buffer});
+    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{s}\n----------------------\n", .{lexer.buffer});
     for (expected_tokens) |expected_token| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);

@@ -30,22 +30,24 @@ test "fuzz_llex input/output pairs" {
 
     var walker = try std.fs.walkPath(allocator, inputs_dir);
     defer walker.deinit();
-    var path_buffer = try std.ArrayListSentineled(u8, 0).init(allocator, outputs_dir);
+    var path_buffer = try std.ArrayList(u8).initCapacity(allocator, outputs_dir.len);
+    path_buffer.appendSliceAssumeCapacity(outputs_dir);
     defer path_buffer.deinit();
+
     var result_buffer: [1024 * 1024]u8 = undefined;
 
     var n: usize = 0;
     while (try walker.next()) |entry| {
         if (verboseTestPrinting) {
-            std.debug.warn("\n{}\n", .{entry.basename});
+            std.debug.warn("\n{s}\n", .{entry.basename});
         }
         const contents = try entry.dir.readFileAlloc(allocator, entry.basename, std.math.maxInt(usize));
         defer allocator.free(contents);
 
-        path_buffer.shrink(outputs_dir.len);
+        path_buffer.shrinkRetainingCapacity(outputs_dir.len);
         try path_buffer.append(std.fs.path.sep);
         try path_buffer.appendSlice(entry.basename);
-        const expectedContents = try std.fs.cwd().readFileAlloc(allocator, path_buffer.span(), std.math.maxInt(usize));
+        const expectedContents = try std.fs.cwd().readFileAlloc(allocator, path_buffer.items, std.math.maxInt(usize));
         defer allocator.free(expectedContents);
 
         // ignore this error for now, see long_str_nesting_compat TODO
@@ -53,54 +55,55 @@ test "fuzz_llex input/output pairs" {
             continue;
         }
 
-        var result_out_stream = std.io.fixedBufferStream(&result_buffer);
-        const result_stream = result_out_stream.outStream();
+        var result_stream = std.io.fixedBufferStream(&result_buffer);
+        const result_writer = result_stream.writer();
 
         var lexer = lex.Lexer.init(contents, allocator, "fuzz");
         defer lexer.deinit();
         while (true) {
             const token = lexer.next() catch |e| {
                 if (verboseTestPrinting) {
-                    std.debug.warn("\n{}\n", .{e});
+                    std.debug.warn("\n{s}\n", .{e});
                 }
-                try result_stream.print("\n{}", .{lexer.error_buffer.items});
+                try result_writer.writeByte('\n');
+                try result_writer.writeAll(lexer.error_buffer.items);
                 break;
             };
             if (verboseTestPrinting) {
                 if (printTokenBounds) {
-                    std.debug.warn("{}:{}:{}", .{ token.start, token.nameForDisplay(), token.end });
+                    std.debug.warn("{d}:{s}:{d}", .{ token.start, token.nameForDisplay(), token.end });
                 } else {
-                    std.debug.warn("{}", .{token.nameForDisplay()});
+                    std.debug.warn("{s}", .{token.nameForDisplay()});
                 }
             }
-            try result_stream.print("{}", .{token.nameForDisplay()});
+            try result_writer.writeAll(token.nameForDisplay());
             if (token.id == lex.Token.Id.eof) {
                 break;
             } else {
                 if (verboseTestPrinting) {
                     std.debug.warn(" ", .{});
                 }
-                try result_stream.print(" ", .{});
+                try result_writer.print(" ", .{});
             }
         }
         if (verboseTestPrinting) {
-            std.debug.warn("\nexpected\n{}\n", .{expectedContents});
+            std.debug.warn("\nexpected\n{s}\n", .{expectedContents});
         }
         var nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
         if (nearIndex) |i| {
-            std.testing.expectEqualStrings(expectedContents[0..i], result_out_stream.getWritten()[0..i]);
+            std.testing.expectEqualStrings(expectedContents[0..i], result_stream.getWritten()[0..i]);
             if (printErrorContextDifferences) {
                 var lastLineEnding = std.mem.lastIndexOf(u8, expectedContents, "\n").? + 1;
                 const expectedError = expectedContents[lastLineEnding..];
-                const actualError = result_out_stream.getWritten()[lastLineEnding..];
+                const actualError = result_stream.getWritten()[lastLineEnding..];
                 if (!std.mem.eql(u8, expectedError, actualError)) {
-                    std.debug.print("\n{}\nexpected: {}\nactual: {}\n", .{ entry.basename, expectedContents[lastLineEnding..], result_out_stream.getWritten()[lastLineEnding..] });
+                    std.debug.print("\n{s}\nexpected: {s}\nactual: {s}\n", .{ entry.basename, expectedContents[lastLineEnding..], result_stream.getWritten()[lastLineEnding..] });
                 }
             }
         } else {
-            std.testing.expectEqualStrings(expectedContents, result_out_stream.getWritten());
+            std.testing.expectEqualStrings(expectedContents, result_stream.getWritten());
         }
         n += 1;
     }
-    std.debug.warn("{} input/output pairs checked...", .{n});
+    std.debug.warn("{d} input/output pairs checked...", .{n});
 }

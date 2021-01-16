@@ -41,8 +41,7 @@ pub fn main() !void {
         const contents = try entry.dir.readFileAlloc(allocator, entry.basename, std.math.maxInt(usize));
         defer allocator.free(contents);
 
-        var lexer = lex.Lexer.init(contents, allocator, "fuzz");
-        defer lexer.deinit();
+        var lexer = lex.Lexer.init(contents, "fuzz");
         while (true) {
             const token = lexer.next() catch |e| {
                 break;

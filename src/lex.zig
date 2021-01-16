@@ -186,6 +186,13 @@ pub const Token = struct {
             },
         };
     }
+
+    pub fn formatForErrorDisplay(self: *const Token, source: []const u8) []const u8 {
+        return switch (self.id) {
+            .name, .string, .number => source[self.start..self.end],
+            else => self.nameForDisplay(),
+        };
+    }
 };
 
 pub const LexError = error{
@@ -207,6 +214,27 @@ pub const lex_error_strings = AutoComptimeLookup(LexError, []const u8, .{
     .{ LexError.EscapeSequenceTooLarge, "escape sequence too large" },
 });
 
+pub const LexErrorContext = struct {
+    token: Token,
+    // TODO this is kinda weird, doesn't seem like it needs to be stored (maybe passed to render instead?)
+    err: LexError,
+
+    pub fn renderAlloc(self: *LexErrorContext, allocator: *Allocator, lexer: *Lexer) ![]const u8 {
+        var buffer = std.ArrayList(u8).init(allocator);
+        errdefer buffer.deinit();
+
+        const looked_up_msg = lex_error_strings.get(self.err).?;
+        const error_writer = buffer.writer();
+        const MAXSRC = 80; // see MAXSRC in llex.c
+        var chunk_id_buf: [MAXSRC]u8 = undefined;
+        const chunk_id = zua.object.getChunkId(lexer.chunk_name, &chunk_id_buf);
+        try error_writer.print("{s}:{d}: {s}", .{ chunk_id, self.token.line_number, looked_up_msg });
+        // TODO I think Lua doesn't print this is the token is single_char \0, need to confirm that though
+        try error_writer.print(" near '{s}'", .{self.token.formatForErrorDisplay(lexer.buffer)});
+        return buffer.toOwnedSlice();
+    }
+};
+
 pub const LexerOptions = struct {};
 
 pub const Lexer = struct {
@@ -216,10 +244,9 @@ pub const Lexer = struct {
     buffer: []const u8,
     index: usize,
     line_number: usize = 1,
-    // TODO change to a struct that holds all the necessary info to create the
-    // error string, but have an e.g. renderAlloc function to actually construct
-    // the error message, that way Lexer doesn't have to take an allocator at all.
-    error_buffer: std.ArrayList(u8),
+    // TODO this still feels slightly sloppy, could probably be cleaned up still.
+    // Would be good to revisit when adding parse error rendering
+    error_context: LexErrorContext = undefined,
 
     /// In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
     /// since \0 is technically in the string literal passed to check_next representing
@@ -241,19 +268,14 @@ pub const Lexer = struct {
     // for now we simply allow [[ (Lua 5.1 errors by default on [[ saying that nesting is deprecated)
     long_str_nesting_compat: bool = false,
 
-    pub const Error = LexError || Allocator.Error;
+    pub const Error = LexError;
 
-    pub fn init(buffer: []const u8, err_allocator: *Allocator, chunk_name: []const u8) Self {
+    pub fn init(buffer: []const u8, chunk_name: []const u8) Self {
         return Self{
             .buffer = buffer,
             .index = 0,
-            .error_buffer = std.ArrayList(u8).init(err_allocator),
             .chunk_name = chunk_name,
         };
-    }
-
-    pub fn deinit(self: *Self) void {
-        self.error_buffer.deinit();
     }
 
     pub fn dump(self: *Self, token: *const Token) void {
@@ -795,37 +817,33 @@ pub const Lexer = struct {
             .index = self.index,
             .line_number = self.line_number,
             .chunk_name = self.chunk_name,
-            .error_buffer = self.error_buffer,
             .check_next_bug_compat = self.check_next_bug_compat,
             .long_str_nesting_compat = self.long_str_nesting_compat,
         };
         return lookaheadLexer.next();
     }
 
-    fn reportLexError(self: *Self, err: LexError, token: Token, id: Token.Id) Error {
-        var fixed_up_token = token;
-        fixed_up_token.id = id;
-        const looked_up_msg = lex_error_strings.get(err).?;
-        const error_writer = self.error_buffer.writer();
-        const MAXSRC = 80; // see MAXSRC in llex.c
-        var chunk_id_buf: [MAXSRC]u8 = undefined;
-        const chunk_id = zua.object.getChunkId(self.chunk_name, &chunk_id_buf);
-        try error_writer.print("{s}:{d}: {s}", .{ chunk_id, self.line_number, looked_up_msg });
-        // TODO I think Lua doesn't print this is the token is single_char \0, need to confirm that though
-        try error_writer.print(" near '{s}'", .{self.formatUnfinishedTokenForErrorDisplay(fixed_up_token)});
+    fn reportLexError(self: *Self, err: LexError, unfinished_token: Token, id: Token.Id) Error {
+        self.error_context = .{
+            .token = .{
+                .id = id,
+                .start = unfinished_token.start,
+                .end = self.index,
+                .line_number = self.line_number,
+                .char = null, // TODO double check that this is always true (single char token can't cause a lex error, right?)
+            },
+            .err = err,
+        };
         return err;
     }
 
-    fn reportLexErrorInc(self: *Self, err: LexError, token: Token, id: Token.Id) Error {
+    fn reportLexErrorInc(self: *Self, err: LexError, unfinished_token: Token, id: Token.Id) Error {
         self.index += 1;
-        return self.reportLexError(err, token, id);
+        return self.reportLexError(err, unfinished_token, id);
     }
 
-    pub fn formatUnfinishedTokenForErrorDisplay(self: *Self, token: Token) []const u8 {
-        return switch (token.id) {
-            .name, .string, .number => self.buffer[token.start..self.index],
-            else => token.nameForDisplay(),
-        };
+    pub fn renderErrorAlloc(self: *Self, allocator: *Allocator) ![]const u8 {
+        return self.error_context.renderAlloc(allocator, self);
     }
 
     /// Like incrementLineNumber but checks that the current char is a line ending first
@@ -1121,21 +1139,18 @@ fn expectLexError(expected: LexError, actual: anytype) void {
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
-    var lexer = Lexer.init(source, std.testing.allocator, source);
-    defer lexer.deinit();
+    var lexer = Lexer.init(source, source);
     return testLexInitialized(&lexer, expected_tokens);
 }
 
 fn testLexCheckNextBugCompat(source: []const u8, expected_tokens: []const Token.Id) !void {
-    var lexer = Lexer.init(source, std.testing.allocator, source);
-    defer lexer.deinit();
+    var lexer = Lexer.init(source, source);
     lexer.check_next_bug_compat = true;
     return testLexInitialized(&lexer, expected_tokens);
 }
 
 fn testLexNoCheckNextBugCompat(source: []const u8, expected_tokens: []const Token.Id) !void {
-    var lexer = Lexer.init(source, std.testing.allocator, source);
-    defer lexer.deinit();
+    var lexer = Lexer.init(source, source);
     lexer.check_next_bug_compat = false;
     return testLexInitialized(&lexer, expected_tokens);
 }
@@ -1178,8 +1193,7 @@ const TokenAndLineNumber = struct {
 };
 
 fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineNumber) !void {
-    var lexer = Lexer.init(source, std.testing.allocator, source);
-    defer lexer.deinit();
+    var lexer = Lexer.init(source, source);
     if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{s}\n----------------------\n", .{lexer.buffer});
     for (expected_tokens) |expected_token| {
         const token = try lexer.next();

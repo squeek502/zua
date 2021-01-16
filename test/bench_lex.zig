@@ -35,8 +35,7 @@ test "bench fuzz_llex inputs" {
         beginMeasure();
         var iteration: usize = 0;
         while (iteration < num_iterations) : (iteration += 1) {
-            var lexer = lex.Lexer.init(contents, allocator, "bench");
-            defer lexer.deinit();
+            var lexer = lex.Lexer.init(contents, "bench");
             while (true) {
                 const token = lexer.next() catch |e| {
                     break;

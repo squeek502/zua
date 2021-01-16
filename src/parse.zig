@@ -23,8 +23,7 @@ pub const max_local_vars = std.math.maxInt(i16);
 pub const max_local_vars_per_func = 200;
 
 pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
-    var lexer = Lexer.init(source, allocator, source);
-    defer lexer.deinit();
+    var lexer = Lexer.init(source, source);
 
     const first_token = try lexer.next();
 

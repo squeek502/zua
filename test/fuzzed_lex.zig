@@ -58,15 +58,16 @@ test "fuzz_llex input/output pairs" {
         var result_stream = std.io.fixedBufferStream(&result_buffer);
         const result_writer = result_stream.writer();
 
-        var lexer = lex.Lexer.init(contents, allocator, "fuzz");
-        defer lexer.deinit();
+        var lexer = lex.Lexer.init(contents, "fuzz");
         while (true) {
             const token = lexer.next() catch |e| {
                 if (verboseTestPrinting) {
                     std.debug.warn("\n{s}\n", .{e});
                 }
                 try result_writer.writeByte('\n');
-                try result_writer.writeAll(lexer.error_buffer.items);
+                const err_msg = try lexer.renderErrorAlloc(allocator);
+                defer allocator.free(err_msg);
+                try result_writer.writeAll(err_msg);
                 break;
             };
             if (verboseTestPrinting) {

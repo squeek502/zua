@@ -246,8 +246,6 @@ pub const LexErrorContext = struct {
     }
 };
 
-pub const LexerOptions = struct {};
-
 pub const Lexer = struct {
     const Self = @This();
 
@@ -257,7 +255,7 @@ pub const Lexer = struct {
     line_number: usize = 1,
     // TODO this still feels slightly sloppy, could probably be cleaned up still.
     // Would be good to revisit when adding parse error rendering
-    error_context: LexErrorContext = undefined,
+    error_context: ?LexErrorContext = null,
 
     /// In Lua 5.1 there is a bug in the lexer where check_next() accepts \0
     /// since \0 is technically in the string literal passed to check_next representing
@@ -556,7 +554,7 @@ pub const Lexer = struct {
                         string_level = 0;
                     },
                     else => {
-                        _ = try self.maybeIncrementLineNumber(&last_line_ending_index);
+                        result.line_number = try self.maybeIncrementLineNumber(&last_line_ending_index);
                     },
                 },
                 State.long_string_possible_end,
@@ -580,7 +578,7 @@ pub const Lexer = struct {
                         string_level += 1;
                     },
                     else => {
-                        _ = try self.maybeIncrementLineNumber(&last_line_ending_index);
+                        result.line_number = try self.maybeIncrementLineNumber(&last_line_ending_index);
                         state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
                     },
                 },
@@ -868,7 +866,11 @@ pub const Lexer = struct {
     }
 
     pub fn renderErrorAlloc(self: *Self, allocator: *Allocator) ![]const u8 {
-        return self.error_context.renderAlloc(allocator, self);
+        if (self.error_context) |*ctx| {
+            return ctx.renderAlloc(allocator, self);
+        } else {
+            return error.NoError;
+        }
     }
 
     /// Like incrementLineNumber but checks that the current char is a line ending first
@@ -1210,15 +1212,27 @@ test "line numbers" {
             .{ .id = Token.Id.name, .line_number = 1 },
             .{ .id = Token.Id.name, .line_number = 2 },
             .{ .id = Token.Id.name, .line_number = 3 },
+            .{ .id = Token.Id.eof, .line_number = 3 },
         },
     );
     try testLexLineNumbers("\n\n\na", &[_]TokenAndLineNumber{
         .{ .id = Token.Id.name, .line_number = 4 },
+        .{ .id = Token.Id.eof, .line_number = 4 },
     });
     // \r\n pair separated by a comment
     try testLexLineNumbers("\r--comment\na", &[_]TokenAndLineNumber{
         .{ .id = Token.Id.name, .line_number = 3 },
+        .{ .id = Token.Id.eof, .line_number = 3 },
     });
+
+    // line endings in comments should affect the line numbers of the tokens afterwards
+    try testLexLineNumbers(
+        "n--[[\n]]",
+        &[_]TokenAndLineNumber{
+            .{ .id = Token.Id.name, .line_number = 1 },
+            .{ .id = Token.Id.eof, .line_number = 2 },
+        },
+    );
 }
 
 const TokenAndLineNumber = struct {
@@ -1234,9 +1248,11 @@ fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineN
         if (dumpTokensDuringTests) lexer.dump(&token);
         std.testing.expectEqual(expected_token.id, token.id);
         std.testing.expectEqual(expected_token.line_number, token.line_number);
+        if (token.id == Token.Id.eof) {
+            return;
+        }
     }
-    const last_token = try lexer.next();
-    std.testing.expectEqual(Token.Id.eof, last_token.id);
+    unreachable; // never hit EOF
 }
 
 test "chunk has too many lines" {

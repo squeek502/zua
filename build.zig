@@ -59,7 +59,27 @@ pub fn build(b: *Builder) void {
     fuzzed_strings_gen.addBuildOption([]const u8, "fuzzed_lex_inputs_dir", fuzzed_lex_inputs_dir);
     fuzzed_strings_gen.addBuildOption([]const u8, "fuzzed_strings_gen_dir", fuzzed_strings_gen_dir);
     fuzzed_strings_gen.addPackagePath("zua", "src/zua.zig");
-
     const fuzzed_strings_gen_run_step = b.step("fuzzed_strings_gen_run", "Generate string inputs from a fuzzed corpus of lexer inputs");
     fuzzed_strings_gen_run_step.dependOn(&fuzzed_strings_gen.run().step);
+
+    const fuzzed_parse_inputs_dir_default = "test/corpus/fuzz_lparser";
+    const fuzzed_parse_outputs_dir_default = "test/output/fuzz_lparser";
+    const fuzzed_parse_inputs_dir = b.option([]const u8, "fuzzed_parse_inputs_dir", "Directory with input corpus for fuzzed_parse tests") orelse fuzzed_parse_inputs_dir_default;
+    const fuzzed_parse_outputs_dir = b.option([]const u8, "fuzzed_parse_outputs_dir", "Directory with expected outputs for fuzzed_parse tests") orelse fuzzed_parse_outputs_dir_default;
+
+    var fuzzed_parse_tests = b.addTest("test/fuzzed_parse.zig");
+    fuzzed_parse_tests.setBuildMode(mode);
+    fuzzed_parse_tests.addBuildOption([]const u8, "fuzzed_parse_inputs_dir", fuzzed_parse_inputs_dir);
+    fuzzed_parse_tests.addBuildOption([]const u8, "fuzzed_parse_outputs_dir", fuzzed_parse_outputs_dir);
+    fuzzed_parse_tests.addPackagePath("zua", "src/zua.zig");
+    const fuzzed_parse_test_step = b.step("fuzzed_parse", "Test parser against a fuzzed corpus from fuzzing-lua");
+    fuzzed_parse_test_step.dependOn(&fuzzed_parse_tests.step);
+
+    var fuzzed_parse_prune = b.addExecutable("fuzzed_parse_prune", "test/fuzzed_parse_prune.zig");
+    fuzzed_parse_prune.setBuildMode(mode);
+    fuzzed_parse_prune.addBuildOption([]const u8, "fuzzed_parse_inputs_dir", fuzzed_parse_inputs_dir);
+    fuzzed_parse_prune.addBuildOption([]const u8, "fuzzed_parse_outputs_dir", fuzzed_parse_outputs_dir);
+    fuzzed_parse_prune.addPackagePath("zua", "src/zua.zig");
+    const fuzzed_parse_prune_step = b.step("fuzzed_parse_prune", "Prune fuzzed parser corpus to remove lexer-specific error outputs");
+    fuzzed_parse_prune_step.dependOn(&fuzzed_parse_prune.run().step);
 }

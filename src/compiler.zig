@@ -5,9 +5,13 @@ const Instruction = zua.opcodes.Instruction;
 const Node = zua.ast.Node;
 const Function = zua.object.Function;
 const Constant = zua.object.Constant;
+const Lexer = zua.lex.Lexer;
+const Parser = zua.parse.Parser;
 
 pub fn compile(allocator: *Allocator, source: []const u8) !Function {
-    var tree = try zua.parse.parse(allocator, source);
+    var lexer = Lexer.init(source, source);
+    var parser = Parser.init(allocator, &lexer);
+    var tree = try parser.parse();
     defer tree.deinit();
 
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);

@@ -1,9 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const zua = @import("zua.zig");
 const Lexer = @import("lex.zig").Lexer;
+const LexErrorContext = zua.lex.LexErrorContext;
 const Token = @import("lex.zig").Token;
 const Node = @import("ast.zig").Node;
 const Tree = @import("ast.zig").Tree;
+const AutoComptimeLookup = @import("comptime_lookup.zig").AutoComptimeLookup;
 
 // Notes:
 //
@@ -22,34 +25,10 @@ pub const max_local_vars = std.math.maxInt(i16);
 /// LUAI_MAXVARS in luaconf.h
 pub const max_local_vars_per_func = 200;
 
-pub fn parse(allocator: *Allocator, source: []const u8) !*Tree {
-    var lexer = Lexer.init(source, source);
-
-    const first_token = try lexer.next();
-
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    errdefer arena.deinit();
-
-    var parser = Parser{
-        .lexer = &lexer,
-        .token = first_token,
-        .allocator = allocator,
-        .arena = &arena.allocator,
-    };
-    const chunk = try parser.chunk();
-
-    const tree = try parser.arena.create(Tree);
-    tree.* = .{
-        .node = chunk,
-        .source = source,
-        .arena = arena.state,
-        .allocator = allocator,
-    };
-    return tree;
-}
+/// LUAI_MAXCCALLS in luaconf.h
+pub const max_syntax_levels = 200;
 
 pub const ParseError = error{
-    ExpectedCloseParen,
     FunctionArgumentsExpected,
     ExpectedEqualsOrIn,
     ExpectedNameOrVarArg,
@@ -58,6 +37,66 @@ pub const ParseError = error{
     ExpectedDifferentToken, // error_expected in lparser.c
     TooManyLocalVariables,
     NoLoopToBreak,
+    TooManySyntaxLevels,
+    AmbiguousSyntax,
+    VarArgOutsideVarArgFunction,
+};
+
+/// error -> msg lookup for parse errors
+pub const parse_error_strings = AutoComptimeLookup(ParseError, []const u8, .{
+    .{ ParseError.FunctionArgumentsExpected, "function arguments expected" },
+    .{ ParseError.ExpectedEqualsOrIn, "'=' or 'in' expected" },
+    .{ ParseError.ExpectedNameOrVarArg, "<name> or '...' expected" },
+    .{ ParseError.UnexpectedSymbol, "unexpected symbol" },
+    .{ ParseError.SyntaxError, "syntax error" },
+    //.{ ParseError.ExpectedDifferentToken, ... }, this is context-specific
+    .{ ParseError.TooManyLocalVariables, "too many local variables" },
+    .{ ParseError.NoLoopToBreak, "no loop to break" },
+    .{ ParseError.TooManySyntaxLevels, "chunk has too many syntax levels" },
+    .{ ParseError.AmbiguousSyntax, "ambiguous syntax (function call x new statement)" },
+    .{ ParseError.VarArgOutsideVarArgFunction, "cannot use '...' outside a vararg function" },
+});
+
+// TODO this is duplcated from lex.zig, should be combined in the future
+pub const ParseErrorContext = struct {
+    token: Token,
+    expected: ?Token = null,
+    expected_match: ?Token = null,
+    // TODO this is kinda weird, doesn't seem like it needs to be stored (maybe passed to render instead?)
+    err: ParseError,
+
+    pub fn renderAlloc(self: *ParseErrorContext, allocator: *Allocator, parser: *Parser) ![]const u8 {
+        var buffer = std.ArrayList(u8).init(allocator);
+        errdefer buffer.deinit();
+
+        var msg_buf: [256]u8 = undefined;
+        const msg = msg: {
+            if (self.err == ParseError.ExpectedDifferentToken) {
+                var msg_fbs = std.io.fixedBufferStream(&msg_buf);
+                const msg_writer = msg_fbs.writer();
+                msg_writer.print("'{s}' expected", .{self.expected.?.nameForDisplay()}) catch unreachable;
+                if (self.expected_match != null and self.expected_match.?.line_number != self.token.line_number) {
+                    msg_writer.print(" (to close '{s}' at line {d})", .{
+                        self.expected_match.?.nameForDisplay(),
+                        self.expected_match.?.line_number,
+                    }) catch unreachable;
+                }
+                break :msg msg_fbs.getWritten();
+            } else {
+                break :msg parse_error_strings.get(self.err).?;
+            }
+        };
+        const error_writer = buffer.writer();
+        const MAXSRC = 80; // see MAXSRC in llex.c
+        var chunk_id_buf: [MAXSRC]u8 = undefined;
+        const chunk_id = zua.object.getChunkId(parser.lexer.chunk_name, &chunk_id_buf);
+        try error_writer.print("{s}:{d}: {s}", .{ chunk_id, self.token.line_number, msg });
+        // special case for 1:1 compatibility with Lua's errors
+        if (!self.token.isChar(0) and self.err != ParseError.TooManySyntaxLevels) {
+            try error_writer.print(" near '{s}'", .{self.token.nameForErrorDisplay(parser.lexer.buffer)});
+        }
+        return buffer.toOwnedSlice();
+    }
 };
 
 pub const Parser = struct {
@@ -68,8 +107,45 @@ pub const Parser = struct {
     allocator: *Allocator,
     arena: *Allocator,
     in_loop: bool = false,
+    in_vararg_func: bool = true, // main chunk is always vararg
+    error_context: ?ParseErrorContext = null,
+    syntax_level: usize = 0,
 
     pub const Error = ParseError || Lexer.Error || Allocator.Error;
+
+    pub fn init(allocator: *Allocator, lexer: *Lexer) Parser {
+        return Parser{
+            .lexer = lexer,
+            .token = undefined,
+            .allocator = allocator,
+            // TODO is this the grossest thing in the world?
+            .arena = undefined,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.arena.deinit();
+    }
+
+    pub fn parse(self: *Self) Error!*Tree {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        errdefer arena.deinit();
+
+        // TODO is this the grossest thing in the world?
+        self.arena = &arena.allocator;
+
+        self.token = try self.lexer.next();
+        const parsed_chunk = try self.chunk();
+
+        const tree = try self.arena.create(Tree);
+        tree.* = .{
+            .node = parsed_chunk,
+            .source = self.lexer.buffer,
+            .arena = arena.state,
+            .allocator = self.allocator,
+        };
+        return tree;
+    }
 
     pub const PossibleLValueExpression = struct {
         node: *Node,
@@ -96,8 +172,9 @@ pub const Parser = struct {
             .keyword_if => return self.ifstat(),
             .keyword_local => {
                 self.token = try self.lexer.next();
+                const possible_function_token = self.token;
                 if (try self.testnext(.keyword_function)) {
-                    return self.localfunc();
+                    return self.localfunc(possible_function_token);
                 } else {
                     return self.localstat();
                 }
@@ -114,6 +191,7 @@ pub const Parser = struct {
     }
 
     fn block(self: *Self, list: *std.ArrayList(*Node)) Error!void {
+        try self.enterlevel();
         while (!blockFollow(self.token)) {
             const stat = try self.statement();
             try list.append(stat);
@@ -123,12 +201,14 @@ pub const Parser = struct {
                 break;
             }
         }
+        self.leavelevel();
     }
 
     /// parlist -> [ param { `,' param } ]
-    fn parlist(self: *Self, list: *std.ArrayList(Token)) Error!void {
+    /// Returns true if vararg was found in the parameter list
+    fn parlist(self: *Self, list: *std.ArrayList(Token)) Error!bool {
         // no params
-        if (self.token.isChar(')')) return;
+        if (self.token.isChar(')')) return false;
 
         var found_vararg = false;
         while (true) {
@@ -137,7 +217,7 @@ pub const Parser = struct {
                 .ellipsis => {
                     found_vararg = true;
                 },
-                else => return error.ExpectedNameOrVarArg,
+                else => return self.reportParseError(ParseError.ExpectedNameOrVarArg),
             }
             try list.append(self.token);
             self.token = try self.lexer.next();
@@ -145,25 +225,29 @@ pub const Parser = struct {
                 break;
             }
         }
+        return found_vararg;
     }
 
     /// body ->  `(' parlist `)' chunk END
-    fn funcbody(self: *Self, name: ?*Node, is_local: bool) Error!*Node {
+    fn funcbody(self: *Self, function_token: Token, name: ?*Node, is_local: bool) Error!*Node {
         try self.checkcharnext('(');
 
         var params = std.ArrayList(Token).init(self.allocator);
         defer params.deinit();
 
-        try self.parlist(&params);
+        const vararg_found = try self.parlist(&params);
 
         try self.checkcharnext(')');
 
         var body = std.ArrayList(*Node).init(self.allocator);
         defer body.deinit();
 
+        const in_vararg_func_prev = self.in_vararg_func;
+        self.in_vararg_func = vararg_found;
         try self.block(&body);
+        self.in_vararg_func = in_vararg_func_prev;
 
-        try self.checknext(.keyword_end); // TODO check_match
+        try self.check_match(.keyword_end, function_token);
 
         const node = try self.arena.create(Node.FunctionDeclaration);
         node.* = .{
@@ -178,10 +262,11 @@ pub const Parser = struct {
     // funcstat -> FUNCTION funcname body
     fn funcstat(self: *Self) Error!*Node {
         std.debug.assert(self.token.id == .keyword_function);
+        const function_token = self.token;
         self.token = try self.lexer.next();
 
         const name = try self.funcname();
-        return self.funcbody(name, false);
+        return self.funcbody(function_token, name, false);
     }
 
     // funcname -> NAME {field} [`:' NAME]
@@ -251,6 +336,8 @@ pub const Parser = struct {
     /// whilestat -> WHILE cond DO block END
     fn whilestat(self: *Self) Error!*Node {
         std.debug.assert(self.token.id == .keyword_while);
+        const while_token = self.token;
+
         self.token = try self.lexer.next();
 
         const condition = try self.cond();
@@ -265,7 +352,7 @@ pub const Parser = struct {
         try self.block(&body);
         self.in_loop = in_loop_prev;
 
-        try self.checknext(.keyword_end); // TODO check_match
+        try self.check_match(.keyword_end, while_token);
 
         var while_statement = try self.arena.create(Node.WhileStatement);
         while_statement.* = .{
@@ -281,7 +368,7 @@ pub const Parser = struct {
         self.token = try self.lexer.next();
 
         if (!self.in_loop) {
-            return error.NoLoopToBreak;
+            return self.reportParseError(ParseError.NoLoopToBreak);
         }
 
         var break_statement = try self.arena.create(Node.BreakStatement);
@@ -293,6 +380,7 @@ pub const Parser = struct {
 
     fn dostat(self: *Self) Error!*Node {
         std.debug.assert(self.token.id == .keyword_do);
+        const do_token = self.token;
         self.token = try self.lexer.next();
 
         var body = std.ArrayList(*Node).init(self.allocator);
@@ -300,7 +388,7 @@ pub const Parser = struct {
 
         try self.block(&body);
 
-        try self.checknext(.keyword_end); // TODO: check_match
+        try self.check_match(.keyword_end, do_token);
 
         const node = try self.arena.create(Node.DoStatement);
         node.* = .{
@@ -312,6 +400,7 @@ pub const Parser = struct {
     /// repeatstat -> REPEAT block UNTIL cond
     fn repeatstat(self: *Self) Error!*Node {
         std.debug.assert(self.token.id == .keyword_repeat);
+        const repeat_token = self.token;
         self.token = try self.lexer.next();
 
         var body = std.ArrayList(*Node).init(self.allocator);
@@ -322,7 +411,7 @@ pub const Parser = struct {
         try self.block(&body);
         self.in_loop = in_loop_prev;
 
-        try self.checknext(.keyword_until); // TODO: check_match
+        try self.check_match(.keyword_until, repeat_token);
 
         const condition = try self.cond();
 
@@ -337,6 +426,8 @@ pub const Parser = struct {
     /// forstat -> FOR (fornum | forlist) END
     fn forstat(self: *Self) Error!*Node {
         std.debug.assert(self.token.id == .keyword_for);
+        const for_token = self.token;
+
         self.token = try self.lexer.next();
 
         const name_token = try self.checkname();
@@ -347,13 +438,13 @@ pub const Parser = struct {
             .single_char => switch (self.token.char.?) {
                 '=' => for_node = try self.fornum(name_token),
                 ',' => for_node = try self.forlist(name_token),
-                else => return error.ExpectedEqualsOrIn,
+                else => return self.reportParseError(ParseError.ExpectedEqualsOrIn),
             },
             .keyword_in => for_node = try self.forlist(name_token),
-            else => return error.ExpectedEqualsOrIn,
+            else => return self.reportParseError(ParseError.ExpectedEqualsOrIn),
         }
 
-        try self.checknext(.keyword_end); // TODO check_match
+        try self.check_match(.keyword_end, for_token);
 
         return for_node;
     }
@@ -465,6 +556,7 @@ pub const Parser = struct {
     /// ifstat -> IF cond THEN block {ELSEIF cond THEN block} [ELSE block] END
     fn ifstat(self: *Self) Error!*Node {
         std.debug.assert(self.token.id == .keyword_if);
+        const if_token = self.token;
 
         var clauses = std.ArrayList(*Node).init(self.allocator);
         defer clauses.deinit();
@@ -485,7 +577,7 @@ pub const Parser = struct {
             try clauses.append(else_clause);
         }
 
-        try self.checknext(.keyword_end); // TODO check_match
+        try self.check_match(.keyword_end, if_token);
 
         var if_statement = try self.arena.create(Node.IfStatement);
         if_statement.* = .{
@@ -494,11 +586,11 @@ pub const Parser = struct {
         return &if_statement.base;
     }
 
-    fn localfunc(self: *Self) Error!*Node {
+    fn localfunc(self: *Self, function_token: Token) Error!*Node {
         const name_token = try self.checkname();
         var name = try self.arena.create(Node.Identifier);
         name.* = .{ .token = name_token };
-        return self.funcbody(&name.base, true);
+        return self.funcbody(function_token, &name.base, true);
     }
 
     /// listfield -> expr
@@ -549,6 +641,7 @@ pub const Parser = struct {
 
     /// constructor -> ??
     fn constructor(self: *Self) Error!*Node {
+        const open_brace_token = self.token;
         try self.checkcharnext('{');
 
         var fields = std.ArrayList(*Node).init(self.allocator);
@@ -559,7 +652,9 @@ pub const Parser = struct {
                 switch (self.token.id) {
                     .name => {
                         // TODO presumably should catch EOF or errors here and translate them to more appropriate errors
-                        const lookahead_token = try self.lexer.lookahead();
+                        const lookahead_token = self.lexer.lookahead() catch |err| {
+                            break :get_field try self.listfield();
+                        };
                         if (lookahead_token.isChar('=')) {
                             break :get_field try self.recfield();
                         } else {
@@ -579,11 +674,14 @@ pub const Parser = struct {
             if (!has_more) break;
         }
 
-        try self.checkcharnext('}'); // TODO check_match
+        const close_brace_token = self.token;
+        try self.checkchar_match('}', open_brace_token);
 
         var node = try self.arena.create(Node.TableConstructor);
         node.* = .{
             .fields = try self.arena.dupe(*Node, fields.items),
+            .open_token = open_brace_token,
+            .close_token = close_brace_token,
         };
         return &node.base;
     }
@@ -615,7 +713,7 @@ pub const Parser = struct {
                 // like the Lua parser (even local var literals like `self`).
                 // Might need to be checked at compile-time rather than parse-time.
                 if (variables.items.len > max_local_vars) {
-                    return error.TooManyLocalVariables;
+                    return self.reportParseError(ParseError.TooManyLocalVariables);
                 }
 
                 if (!try self.testcharnext(',')) break;
@@ -627,7 +725,7 @@ pub const Parser = struct {
             var variable = first_variable.?;
             while (true) {
                 if (!variable.can_be_assigned_to) {
-                    return error.SyntaxError;
+                    return self.reportParseError(ParseError.SyntaxError);
                 }
                 try variables.append(variable.node);
                 if (try self.testcharnext(',')) {
@@ -673,8 +771,9 @@ pub const Parser = struct {
     fn simpleexp(self: *Self) Error!*Node {
         switch (self.token.id) {
             .string, .number, .keyword_false, .keyword_true, .keyword_nil, .ellipsis => {
-                // TODO: "cannot use ... outside a vararg function"
-                // or should that be a compile error instead?
+                if (self.token.id == .ellipsis and !self.in_vararg_func) {
+                    return self.reportParseError(ParseError.VarArgOutsideVarArgFunction);
+                }
                 const node = try self.arena.create(Node.Literal);
                 node.* = .{
                     .token = self.token,
@@ -689,8 +788,9 @@ pub const Parser = struct {
                 }
             },
             .keyword_function => {
+                const function_token = self.token;
                 self.token = try self.lexer.next(); // skip function
-                return self.funcbody(null, false);
+                return self.funcbody(function_token, null, false);
             },
             else => {},
         }
@@ -706,6 +806,7 @@ pub const Parser = struct {
     /// subexpr -> (simpleexp | unop subexpr) { binop subexpr }
     /// where `binop' is any binary operator with a priority higher than `limit'
     fn subexpr(self: *Self, limit: usize) Error!SubExpr {
+        try self.enterlevel();
         var node: *Node = get_node: {
             if (isUnaryOperator(self.token)) {
                 const unary_token = self.token;
@@ -743,6 +844,7 @@ pub const Parser = struct {
         } else {
             op = null;
         }
+        self.leavelevel();
         return SubExpr{
             .node = node,
             .untreated_operator = op,
@@ -778,14 +880,18 @@ pub const Parser = struct {
                             expression.can_be_assigned_to = true;
                         },
                         '[' => {
+                            const open_token = self.token;
                             self.token = try self.lexer.next(); // skip the [
                             const index = try self.expr();
+                            const close_token = self.token;
                             try self.checkcharnext(']');
 
                             var new_node = try self.arena.create(Node.IndexAccess);
                             new_node.* = .{
                                 .prefix = expression.node,
                                 .index = index,
+                                .open_token = open_token,
+                                .close_token = close_token,
                             };
                             expression.node = &new_node.base;
                             expression.can_be_assigned_to = true;
@@ -828,26 +934,30 @@ pub const Parser = struct {
         var arguments = std.ArrayList(*Node).init(self.allocator);
         defer arguments.deinit();
 
+        var open_args_token: ?Token = null;
+        var close_args_token: ?Token = null;
         switch (self.token.id) {
             .single_char => switch (self.token.char.?) {
                 '(' => {
-                    // TODO ambiguous syntax (function call x new statement)
-                    // if ( is on different line from the func name expression
+                    open_args_token = self.token;
+                    const last_token = expression.getLastToken();
+                    if (last_token.line_number != open_args_token.?.line_number) {
+                        return self.reportParseError(ParseError.AmbiguousSyntax);
+                    }
                     self.token = try self.lexer.next();
                     const has_no_arguments = self.token.isChar(')');
                     if (!has_no_arguments) {
                         _ = try self.explist1(&arguments);
                     }
-                    if (!(try self.testcharnext(')'))) { // TODO check_match
-                        return error.ExpectedCloseParen;
-                    }
+                    close_args_token = self.token;
+                    try self.checkchar_match(')', open_args_token.?);
                 },
                 '{' => {
                     const node = try self.constructor();
                     try arguments.append(node);
                 },
                 else => {
-                    return error.FunctionArgumentsExpected;
+                    return self.reportParseError(ParseError.FunctionArgumentsExpected);
                 },
             },
             .string => {
@@ -858,13 +968,15 @@ pub const Parser = struct {
                 try arguments.append(&node.base);
                 self.token = try self.lexer.next();
             },
-            else => return error.FunctionArgumentsExpected,
+            else => return self.reportParseError(ParseError.FunctionArgumentsExpected),
         }
 
         var call = try self.arena.create(Node.Call);
         call.* = .{
             .expression = expression,
             .arguments = try self.arena.dupe(*Node, arguments.items),
+            .open_args_token = open_args_token,
+            .close_args_token = close_args_token,
         };
         return &call.base;
     }
@@ -881,13 +993,22 @@ pub const Parser = struct {
             },
             .single_char => switch (self.token.char.?) {
                 '(' => {
-                    self.token = try self.lexer.next();
-                    const node = try self.expr();
+                    const open_paren_token = self.token;
 
-                    try self.checkcharnext(')'); // TODO check_match
+                    self.token = try self.lexer.next();
+                    const expression = try self.expr();
+
+                    const node = try self.arena.create(Node.GroupedExpression);
+                    node.* = .{
+                        .open_token = open_paren_token,
+                        .expression = expression,
+                        .close_token = self.token,
+                    };
+
+                    try self.checkchar_match(')', open_paren_token);
 
                     return PossibleLValueExpression{
-                        .node = node,
+                        .node = &node.base,
                         .can_be_assigned_to = false,
                     };
                 },
@@ -895,7 +1016,7 @@ pub const Parser = struct {
             },
             else => {},
         }
-        return error.UnexpectedSymbol;
+        return self.reportParseError(ParseError.UnexpectedSymbol);
     }
 
     /// Skip to next token if the current token matches the given ID
@@ -917,11 +1038,27 @@ pub const Parser = struct {
     }
 
     fn check(self: *Self, expected_id: Token.Id) !void {
-        if (self.token.id != expected_id) return error.ExpectedDifferentToken;
+        if (self.token.id != expected_id) {
+            return self.reportParseErrorExpected(ParseError.ExpectedDifferentToken, Token{
+                .id = expected_id,
+                .start = self.token.start,
+                .end = self.token.end,
+                .char = null,
+                .line_number = self.token.line_number,
+            });
+        }
     }
 
     fn checkchar(self: *Self, expected_char: u8) !void {
-        if (!self.token.isChar(expected_char)) return error.ExpectedDifferentToken;
+        if (!self.token.isChar(expected_char)) {
+            return self.reportParseErrorExpected(ParseError.ExpectedDifferentToken, Token{
+                .id = .single_char,
+                .start = self.token.start,
+                .end = self.token.end,
+                .char = expected_char,
+                .line_number = self.token.line_number,
+            });
+        }
     }
 
     fn checknext(self: *Self, expected_id: Token.Id) !void {
@@ -940,6 +1077,68 @@ pub const Parser = struct {
         const token = self.token;
         try self.checknext(.name);
         return token;
+    }
+
+    fn check_match(self: *Self, expected_id: Token.Id, to_close: Token) !void {
+        if (!try self.testnext(expected_id)) {
+            return self.reportParseErrorExpectedToMatch(ParseError.ExpectedDifferentToken, Token{
+                .id = expected_id,
+                .start = self.token.start,
+                .end = self.token.end,
+                .char = null,
+                .line_number = self.token.line_number,
+            }, to_close);
+        }
+    }
+
+    fn checkchar_match(self: *Self, expected_char: u8, to_close: Token) !void {
+        if (!try self.testcharnext(expected_char)) {
+            return self.reportParseErrorExpectedToMatch(ParseError.ExpectedDifferentToken, Token{
+                .id = .single_char,
+                .start = self.token.start,
+                .end = self.token.end,
+                .char = expected_char,
+                .line_number = self.token.line_number,
+            }, to_close);
+        }
+    }
+
+    fn enterlevel(self: *Self) !void {
+        self.syntax_level += 1;
+        if (self.syntax_level > max_syntax_levels) {
+            return self.reportParseError(ParseError.TooManySyntaxLevels);
+        }
+    }
+
+    fn leavelevel(self: *Self) void {
+        std.debug.assert(self.syntax_level > 0);
+        self.syntax_level -= 1;
+    }
+
+    fn reportParseError(self: *Self, err: ParseError) ParseError {
+        return self.reportParseErrorExpectedToMatch(err, null, null);
+    }
+
+    fn reportParseErrorExpected(self: *Self, err: ParseError, expected: ?Token) ParseError {
+        return self.reportParseErrorExpectedToMatch(err, expected, null);
+    }
+
+    fn reportParseErrorExpectedToMatch(self: *Self, err: ParseError, expected: ?Token, expected_match: ?Token) ParseError {
+        self.error_context = .{
+            .token = self.token,
+            .expected = expected,
+            .expected_match = expected_match,
+            .err = err,
+        };
+        return err;
+    }
+
+    pub fn renderErrorAlloc(self: *Self, allocator: *Allocator) ![]const u8 {
+        if (self.error_context) |*ctx| {
+            return ctx.renderAlloc(allocator, self);
+        } else {
+            return self.lexer.renderErrorAlloc(allocator);
+        }
     }
 };
 
@@ -1007,7 +1206,10 @@ fn getBinaryPriority(token: Token) BinaryPriority {
 
 test "check hello world ast" {
     const allocator = std.testing.allocator;
-    var tree = try parse(allocator, "print \"hello world\"");
+    const source = "print \"hello world\"";
+    var lexer = Lexer.init(source, source);
+    var parser = Parser.init(std.testing.allocator, &lexer);
+    var tree = try parser.parse();
     defer tree.deinit();
 
     std.testing.expectEqual(Node.Id.chunk, tree.node.id);
@@ -1022,7 +1224,9 @@ test "check hello world ast" {
 
 fn testParse(source: []const u8, expected_ast_dump: []const u8) !void {
     const allocator = std.testing.allocator;
-    var tree = try parse(allocator, source);
+    var lexer = Lexer.init(source, source);
+    var parser = Parser.init(allocator, &lexer);
+    var tree = try parser.parse();
     defer tree.deinit();
 
     var buf = std.ArrayList(u8).init(allocator);
@@ -1480,7 +1684,10 @@ test "assignment" {
         \\chunk
         \\ assignment_statement
         \\  field_access .<name>
-        \\   identifier
+        \\   grouped_expression
+        \\   (
+        \\    identifier
+        \\   )
         \\ =
         \\  literal nil
         \\
@@ -1499,11 +1706,11 @@ test "assignment" {
 }
 
 test "assignment errors" {
-    expectParseError(error.SyntaxError, "(a) = nil");
-    expectParseError(error.UnexpectedSymbol, "(a)() = nil");
-    expectParseError(error.FunctionArgumentsExpected, "a:b = nil");
-    expectParseError(error.SyntaxError, "(a)");
-    expectParseError(error.UnexpectedSymbol, "true = nil");
+    expectParseError(ParseError.SyntaxError, "(a) = nil");
+    expectParseError(ParseError.UnexpectedSymbol, "(a)() = nil");
+    expectParseError(ParseError.FunctionArgumentsExpected, "a:b = nil");
+    expectParseError(ParseError.SyntaxError, "(a)");
+    expectParseError(ParseError.UnexpectedSymbol, "true = nil");
 }
 
 test "table constructors" {
@@ -1684,16 +1891,31 @@ test "operators" {
 }
 
 test "errors" {
-    expectParseError(error.ExpectedDifferentToken, "untilû");
-    expectParseError(error.ExpectedDifferentToken, "until");
+    expectParseError(ParseError.ExpectedDifferentToken, "untilû");
+    expectParseError(ParseError.ExpectedDifferentToken, "until");
 
     // return and break must be the last statement in a block
-    expectParseError(error.ExpectedDifferentToken, "return; local a = 1");
-    expectParseError(error.ExpectedDifferentToken, "for i=1,2 do break; local a = 1 end");
+    expectParseError(ParseError.ExpectedDifferentToken, "return; local a = 1");
+    expectParseError(ParseError.ExpectedDifferentToken, "for i=1,2 do break; local a = 1 end");
 
     // break must be in a loop
-    expectParseError(error.NoLoopToBreak, "break");
+    expectParseError(ParseError.NoLoopToBreak, "break");
 
-    // TODO ambiguous syntax (function call x new statement)
-    // expectParseError(error.AmbiguousSyntax, "f\n()");
+    expectParseError(ParseError.ExpectedDifferentToken,
+        \\local a = function()
+        \\
+        \\
+    );
+
+    expectParseError(ParseError.ExpectedDifferentToken,
+        \\(
+        \\
+        \\a
+        \\
+    );
+
+    expectParseError(ParseError.AmbiguousSyntax, "f\n()");
+    expectParseError(ParseError.AmbiguousSyntax, "(\nf\n)\n()");
+
+    expectParseError(ParseError.VarArgOutsideVarArgFunction, "function a() local b = {...} end");
 }

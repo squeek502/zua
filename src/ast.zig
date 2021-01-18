@@ -45,6 +45,7 @@ pub const Node = struct {
         table_field,
         unary_expression,
         binary_expression,
+        grouped_expression,
 
         pub fn Type(id: Id) type {
             return switch (id) {
@@ -69,6 +70,7 @@ pub const Node = struct {
                 .table_field => TableField,
                 .unary_expression => UnaryExpression,
                 .binary_expression => BinaryExpression,
+                .grouped_expression => GroupedExpression,
             };
         }
     };
@@ -89,6 +91,8 @@ pub const Node = struct {
         base: Node = .{ .id = .call },
         expression: *Node,
         arguments: []*Node,
+        open_args_token: ?Token,
+        close_args_token: ?Token,
     };
 
     pub const Literal = struct {
@@ -121,6 +125,8 @@ pub const Node = struct {
         base: Node = .{ .id = .index_access },
         prefix: *Node,
         index: *Node,
+        open_token: Token,
+        close_token: Token,
     };
 
     pub const IfStatement = struct {
@@ -190,6 +196,8 @@ pub const Node = struct {
     pub const TableConstructor = struct {
         base: Node = .{ .id = .table_constructor },
         fields: []*Node,
+        open_token: Token,
+        close_token: Token,
     };
 
     pub const TableField = struct {
@@ -210,6 +218,56 @@ pub const Node = struct {
         left: *Node,
         right: *Node,
     };
+
+    pub const GroupedExpression = struct {
+        base: Node = .{ .id = .grouped_expression },
+        open_token: Token,
+        expression: *Node,
+        close_token: Token,
+    };
+
+    /// Gets the last token of an expression
+    /// Needed for detecting ambiguous function calls
+    pub fn getLastToken(node: *const Node) Token {
+        switch (node.id) {
+            .identifier => {
+                const casted = @fieldParentPtr(Node.Identifier, "base", node);
+                return casted.token;
+            },
+            .grouped_expression => {
+                const casted = @fieldParentPtr(Node.GroupedExpression, "base", node);
+                return casted.close_token;
+            },
+            .field_access => {
+                const casted = @fieldParentPtr(Node.FieldAccess, "base", node);
+                return casted.field;
+            },
+            .index_access => {
+                const casted = @fieldParentPtr(Node.IndexAccess, "base", node);
+                return casted.close_token;
+            },
+            .call => {
+                const casted = @fieldParentPtr(Node.Call, "base", node);
+                if (casted.close_args_token) |close_token| {
+                    return close_token;
+                } else {
+                    return casted.arguments[casted.arguments.len - 1].getLastToken();
+                }
+            },
+            .literal => {
+                const casted = @fieldParentPtr(Node.Literal, "base", node);
+                return casted.token;
+            },
+            .table_constructor => {
+                const casted = @fieldParentPtr(Node.TableConstructor, "base", node);
+                return casted.close_token;
+            },
+            else => {
+                std.debug.print("{}\n", .{node});
+                @panic("TODO");
+            },
+        }
+    }
 
     pub fn dump(
         node: *const Node,
@@ -422,6 +480,17 @@ pub const Node = struct {
                 try writer.writeAll("\n");
                 try binary.left.dump(writer, indent + 1);
                 try binary.right.dump(writer, indent + 1);
+            },
+            .grouped_expression => {
+                const grouped = @fieldParentPtr(Node.GroupedExpression, "base", node);
+                try writer.writeAll("\n");
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll(grouped.open_token.nameForDisplay());
+                try writer.writeAll("\n");
+                try grouped.expression.dump(writer, indent + 1);
+                try writer.writeByteNTimes(' ', indent);
+                try writer.writeAll(grouped.close_token.nameForDisplay());
+                try writer.writeAll("\n");
             },
         }
     }

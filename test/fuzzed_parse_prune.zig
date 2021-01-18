@@ -27,7 +27,7 @@ pub fn main() !void {
 
     var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
     defer inputs_dir.close();
-    var outputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
+    var outputs_dir = try std.fs.cwd().openDir(outputs_dir_path, .{});
     defer outputs_dir.close();
 
     var paths_to_remove = std.ArrayList([]const u8).init(allocator);

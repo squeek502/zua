@@ -25,37 +25,35 @@ test "fuzzed_parse input/output pairs" {
     var allocator = &arena_allocator.allocator;
 
     // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
-    const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
+    const inputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    const outputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
 
-    var walker = try std.fs.walkPath(allocator, inputs_dir);
-    defer walker.deinit();
-    var path_buffer = try std.ArrayList(u8).initCapacity(allocator, outputs_dir.len);
-    path_buffer.appendSliceAssumeCapacity(outputs_dir);
-    defer path_buffer.deinit();
-    var result_buffer: [1024 * 1024]u8 = undefined;
+    var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
+    defer inputs_dir.close();
+    var outputs_dir = try std.fs.cwd().openDir(outputs_dir_path, .{});
+    defer outputs_dir.close();
 
     var n: usize = 0;
     var nskipped: usize = 0;
     var nlexerrors: usize = 0;
     var nbytecode: usize = 0;
-    while (try walker.next()) |entry| {
-        if (verboseTestPrinting) {
-            std.debug.warn("\n{s}\n", .{entry.basename});
-        }
-        const contents = try entry.dir.readFileAlloc(allocator, entry.basename, std.math.maxInt(usize));
-        defer allocator.free(contents);
+    var inputs_iterator = inputs_dir.iterate();
+    while (try inputs_iterator.next()) |entry| {
+        if (entry.kind != .File) continue;
 
-        path_buffer.shrinkRetainingCapacity(outputs_dir.len);
-        try path_buffer.append(std.fs.path.sep);
-        try path_buffer.appendSlice(entry.basename);
-        const expectedContents = try std.fs.cwd().readFileAlloc(allocator, path_buffer.items, std.math.maxInt(usize));
+        if (verboseTestPrinting) {
+            std.debug.warn("\n{s}\n", .{entry.name});
+        }
+
+        const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
+        defer allocator.free(contents);
+        const expectedContents = try outputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(expectedContents);
 
         // apparently luac can miscompile certain inputs which gives a blank output file
         if (expectedContents.len == 0) {
             if (verboseTestPrinting) {
-                std.debug.print("luac miscompilation: {s}\n", .{entry.basename});
+                std.debug.print("luac miscompilation: {s}\n", .{entry.name});
             }
             continue;
         }
@@ -67,7 +65,7 @@ test "fuzzed_parse input/output pairs" {
         var parser = zua.parse.Parser.init(allocator, &lexer);
         if (parser.parse()) |tree| {
             if (is_error_expected) {
-                std.debug.print("{s}:\n```\n{e}\n```\n\nexpected error:\n{s}\n\ngot tree:\n", .{ entry.basename, contents, expectedContents });
+                std.debug.print("{s}:\n```\n{e}\n```\n\nexpected error:\n{s}\n\ngot tree:\n", .{ entry.name, contents, expectedContents });
                 try tree.dump(std.io.getStdErr().writer());
                 std.debug.print("\n", .{});
                 unreachable;
@@ -77,7 +75,7 @@ test "fuzzed_parse input/output pairs" {
             }
         } else |err| {
             if (is_bytecode_expected) {
-                std.debug.print("{s}:\n```\n{e}\n```\n\nexpected no error, got:\n{}\n", .{ entry.basename, contents, err });
+                std.debug.print("{s}:\n```\n{e}\n```\n\nexpected no error, got:\n{}\n", .{ entry.name, contents, err });
                 unreachable;
             } else {
                 if (isInErrorSet(err, zua.lex.LexError)) {
@@ -113,7 +111,7 @@ test "fuzzed_parse input/output pairs" {
                     std.testing.expectEqualStrings(expectedContents[0..i], err_msg[0..std.math.min(i, err_msg.len)]);
                     if (printErrorContextDifferences) {
                         if (!std.mem.eql(u8, expectedContents, err_msg)) {
-                            std.debug.print("\n{s}\nexpected: {e}\nactual: {e}\n", .{ entry.basename, expectedContents, err_msg });
+                            std.debug.print("\n{s}\nexpected: {e}\nactual: {e}\n", .{ entry.name, expectedContents, err_msg });
                         }
                     }
                 } else {
@@ -125,7 +123,7 @@ test "fuzzed_parse input/output pairs" {
         n += 1;
     }
     std.debug.warn(
-        "\n{} input/output pairs tested: {} passed, {} skipped (skipped {} bytecode outputs, {} unimplemented errors)...\n",
+        "\n{} input/output pairs tested: {} passed, {} skipped (skipped {} bytecode outputs, {} unimplemented errors)\n",
         .{ n + nskipped + nbytecode, n, nskipped + nbytecode, nbytecode, nskipped },
     );
     if (nlexerrors > 0) {

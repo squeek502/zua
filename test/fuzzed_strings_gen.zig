@@ -19,26 +19,27 @@ pub fn main() !void {
     var allocator = &arena_allocator.allocator;
 
     // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
-    const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
+    const inputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    const outputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
 
     // clean the outputs dir
-    std.fs.cwd().deleteTree(outputs_dir) catch |err| switch (err) {
+    std.fs.cwd().deleteTree(outputs_dir_path) catch |err| switch (err) {
         error.NotDir => {},
         else => |e| return e,
     };
-    try std.fs.cwd().makePath(outputs_dir);
+    try std.fs.cwd().makePath(outputs_dir_path);
 
-    var walker = try std.fs.walkPath(allocator, inputs_dir);
-    defer walker.deinit();
-    var path_buffer = try std.ArrayList(u8).initCapacity(allocator, outputs_dir.len);
-    path_buffer.appendSliceAssumeCapacity(outputs_dir);
-    defer path_buffer.deinit();
-    var result_buffer: [1024 * 1024]u8 = undefined;
+    var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
+    defer inputs_dir.close();
+    var outputs_dir = try std.fs.cwd().openDir(outputs_dir_path, .{});
+    defer outputs_dir.close();
 
     var n: usize = 0;
-    while (try walker.next()) |entry| {
-        const contents = try entry.dir.readFileAlloc(allocator, entry.basename, std.math.maxInt(usize));
+    var inputs_iterator = inputs_dir.iterate();
+    while (try inputs_iterator.next()) |entry| {
+        if (entry.kind != .File) continue;
+
+        const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(contents);
 
         var lexer = lex.Lexer.init(contents, "fuzz");
@@ -49,12 +50,7 @@ pub fn main() !void {
             if (token.id == lex.Token.Id.eof) break;
             if (token.id != lex.Token.Id.string) continue;
 
-            path_buffer.shrinkRetainingCapacity(outputs_dir.len);
-            try path_buffer.append(std.fs.path.sep);
-            var buffer_writer = path_buffer.writer();
-            try buffer_writer.print("{}", .{n});
-
-            try std.fs.cwd().writeFile(path_buffer.items, contents[token.start..token.end]);
+            try outputs_dir.writeFile(entry.name, contents[token.start..token.end]);
 
             n += 1;
             if (n % 100 == 0) {
@@ -62,5 +58,5 @@ pub fn main() !void {
             }
         }
     }
-    std.debug.warn("{} files written to '{s}'\n", .{ n, outputs_dir });
+    std.debug.warn("{} files written to '{s}'\n", .{ n, outputs_dir_path });
 }

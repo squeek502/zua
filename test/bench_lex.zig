@@ -20,16 +20,19 @@ test "bench fuzz_llex inputs" {
     const build_options = @import("build_options");
     const inputs_dir_opt = build_options.fuzzed_lex_inputs_dir;
     // resolve this now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    const inputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
+    defer inputs_dir.close();
 
     std.debug.warn("Mode: {}\n", .{@import("builtin").mode});
-    var walker = try std.fs.walkPath(allocator, inputs_dir);
-    defer walker.deinit();
     var n: usize = 0;
     var time: u64 = 0;
     const num_iterations = 1000;
-    while (try walker.next()) |entry| {
-        const contents = try entry.dir.readFileAlloc(allocator, entry.basename, std.math.maxInt(usize));
+    var inputs_iterator = inputs_dir.iterate();
+    while (try inputs_iterator.next()) |entry| {
+        if (entry.kind != .File) continue;
+
+        const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(contents);
 
         beginMeasure();

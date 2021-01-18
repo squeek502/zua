@@ -25,29 +25,28 @@ test "fuzz_llex input/output pairs" {
     var allocator = &arena_allocator.allocator;
 
     // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
-    const outputs_dir = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
+    const inputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    const outputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
 
-    var walker = try std.fs.walkPath(allocator, inputs_dir);
-    defer walker.deinit();
-    var path_buffer = try std.ArrayList(u8).initCapacity(allocator, outputs_dir.len);
-    path_buffer.appendSliceAssumeCapacity(outputs_dir);
-    defer path_buffer.deinit();
+    var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
+    defer inputs_dir.close();
+    var outputs_dir = try std.fs.cwd().openDir(outputs_dir_path, .{});
+    defer outputs_dir.close();
 
     var result_buffer: [1024 * 1024]u8 = undefined;
 
     var n: usize = 0;
-    while (try walker.next()) |entry| {
-        if (verboseTestPrinting) {
-            std.debug.warn("\n{s}\n", .{entry.basename});
-        }
-        const contents = try entry.dir.readFileAlloc(allocator, entry.basename, std.math.maxInt(usize));
-        defer allocator.free(contents);
+    var inputs_iterator = inputs_dir.iterate();
+    while (try inputs_iterator.next()) |entry| {
+        if (entry.kind != .File) continue;
 
-        path_buffer.shrinkRetainingCapacity(outputs_dir.len);
-        try path_buffer.append(std.fs.path.sep);
-        try path_buffer.appendSlice(entry.basename);
-        const expectedContents = try std.fs.cwd().readFileAlloc(allocator, path_buffer.items, std.math.maxInt(usize));
+        if (verboseTestPrinting) {
+            std.debug.warn("\n{s}\n", .{entry.name});
+        }
+
+        const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
+        defer allocator.free(contents);
+        const expectedContents = try outputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(expectedContents);
 
         // ignore this error for now, see long_str_nesting_compat TODO
@@ -98,7 +97,7 @@ test "fuzz_llex input/output pairs" {
                 const expectedError = expectedContents[lastLineEnding..];
                 const actualError = result_stream.getWritten()[lastLineEnding..];
                 if (!std.mem.eql(u8, expectedError, actualError)) {
-                    std.debug.print("\n{s}\nexpected: {s}\nactual: {s}\n", .{ entry.basename, expectedContents[lastLineEnding..], result_stream.getWritten()[lastLineEnding..] });
+                    std.debug.print("\n{s}\nexpected: {s}\nactual: {s}\n", .{ entry.name, expectedContents[lastLineEnding..], result_stream.getWritten()[lastLineEnding..] });
                 }
             }
         } else {
@@ -106,5 +105,5 @@ test "fuzz_llex input/output pairs" {
         }
         n += 1;
     }
-    std.debug.warn("{d} input/output pairs checked...", .{n});
+    std.debug.warn("\n{d} input/output pairs checked\n", .{n});
 }

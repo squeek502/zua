@@ -20,13 +20,13 @@ const inputs_dir_opt = build_options.fuzzed_strings_inputs_dir;
 const outputs_dir_opt = build_options.fuzzed_strings_outputs_dir;
 
 test "string input/output pairs" {
-    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena_allocator.deinit();
-    var allocator = &arena_allocator.allocator;
+    var allocator = std.testing.allocator;
 
     // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
     const inputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
+    defer allocator.free(inputs_dir_path);
     const outputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
+    defer allocator.free(outputs_dir_path);
 
     var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
     defer inputs_dir.close();

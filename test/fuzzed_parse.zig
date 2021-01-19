@@ -62,8 +62,9 @@ test "fuzzed_parse input/output pairs" {
         const is_error_expected = !is_bytecode_expected;
 
         var lexer = zua.lex.Lexer.init(contents, "fuzz");
-        var parser = zua.parse.Parser.init(allocator, &lexer);
-        if (parser.parse()) |tree| {
+        var parser = zua.parse.Parser.init(&lexer);
+        if (parser.parse(allocator)) |tree| {
+            defer tree.deinit();
             if (is_error_expected) {
                 std.debug.print("{s}:\n```\n{e}\n```\n\nexpected error:\n{s}\n\ngot tree:\n", .{ entry.name, contents, expectedContents });
                 try tree.dump(std.io.getStdErr().writer());

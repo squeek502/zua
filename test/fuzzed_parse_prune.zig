@@ -54,13 +54,14 @@ pub fn main() !void {
         }
 
         var lexer = zua.lex.Lexer.init(contents, "fuzz");
-        var parser = zua.parse.Parser.init(allocator, &lexer);
-        _ = parser.parse() catch |err| {
+        var parser = zua.parse.Parser.init(&lexer);
+        var tree = parser.parse(allocator) catch |err| {
             if (isInErrorSet(err, zua.lex.LexError)) {
                 const duped_path = try allocator.dupe(u8, entry.name);
                 try paths_to_remove.append(duped_path);
             }
         };
+        defer tree.deinit();
     }
 
     std.debug.print("removing {d} pairs...", .{paths_to_remove.items.len});

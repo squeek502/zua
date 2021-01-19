@@ -10,8 +10,8 @@ const Parser = zua.parse.Parser;
 
 pub fn compile(allocator: *Allocator, source: []const u8) !Function {
     var lexer = Lexer.init(source, source);
-    var parser = Parser.init(allocator, &lexer);
-    var tree = try parser.parse();
+    var parser = Parser.init(&lexer);
+    var tree = try parser.parse(allocator);
     defer tree.deinit();
 
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);

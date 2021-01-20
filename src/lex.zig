@@ -571,7 +571,9 @@ pub const Lexer = struct {
                                 break;
                             }
                         } else {
-                            state = if (state == State.long_comment_possible_end) State.long_comment else State.long_string;
+                            // don't change state, since this char could be the start of a new end sequence
+                            // but reset the level back to 0
+                            string_level = 0;
                         }
                     },
                     '=' => {
@@ -969,6 +971,8 @@ test "long strings" {
     try testLex("[[ [[ ]]", &[_]Token.Id{Token.Id.string});
     // this is always allowed
     try testLex("[=[ [[ ]] ]=]", &[_]Token.Id{Token.Id.string});
+    // unfinished end directly into real end
+    try testLex("[==[]=]==]", &[_]Token.Id{Token.Id.string});
 }
 
 test "comments and dashes" {
@@ -982,6 +986,8 @@ test "comments and dashes" {
     try testLex("--[==[\nlocal\nhello\n=\n'world'\n]==]", &[_]Token.Id{});
     try testLex("--[==", &[_]Token.Id{});
     try testLex("--[\n]]", &[_]Token.Id{ Token.Id.single_char, Token.Id.single_char });
+    // unfinished end directly into real end
+    try testLex("--[===[]=]===]", &[_]Token.Id{});
 }
 
 test "whitespace" {

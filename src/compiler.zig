@@ -99,8 +99,8 @@ pub const Compiler = struct {
                     @panic("TODO");
                 },
                 .global => {
-                    const index = try self.emitABx(.getglobal, 0, @intCast(u18, e.val.?));
-                    e.val = @intCast(isize, index);
+                    const index = try self.emitABx(.getglobal, 0, @intCast(u18, e.value.?.index));
+                    e.value = .{ .index = index };
                     e.kind = .relocable;
                 },
                 .indexed => {
@@ -117,7 +117,7 @@ pub const Compiler = struct {
             if (e.kind == .call) {
                 e.kind = .nonreloc;
                 const instruction = self.getcode(e);
-                e.val = instruction.a;
+                e.value = .{ .reg = instruction.a };
             } else if (e.kind == .vararg) {
                 const instruction = self.getcode(e);
                 const instructionABC = @ptrCast(*InstructionABC, instruction);
@@ -128,7 +128,7 @@ pub const Compiler = struct {
 
         pub fn freeexp(self: *Func, e: *ExpDesc) !void {
             if (e.kind == .nonreloc) {
-                self.freereg(@intCast(u8, e.val.?));
+                self.freereg(e.value.?.reg);
             }
         }
 
@@ -141,7 +141,7 @@ pub const Compiler = struct {
 
         pub fn getcode(self: *Func, e: *ExpDesc) *Instruction {
             // TODO some sanity checking
-            const index = @intCast(usize, e.val.?);
+            const index = @intCast(usize, e.value.?.index);
             return &self.code.items[index];
         }
 
@@ -157,7 +157,7 @@ pub const Compiler = struct {
 
             e.patch_list_exit_when_true = null;
             e.patch_list_exit_when_false = null;
-            e.val = reg;
+            e.value = .{ .reg = reg };
             e.kind = .nonreloc;
         }
 
@@ -171,17 +171,15 @@ pub const Compiler = struct {
                     _ = try self.emitABC(.loadbool, reg, @boolToInt(e.kind == .@"true"), 0);
                 },
                 .index_of_constant => {
-                    _ = try self.emitABx(.loadk, reg, @intCast(u18, e.val.?));
+                    _ = try self.emitABx(.loadk, reg, @intCast(u18, e.value.?.index));
                 },
                 .number => {
-                    // TODO: Need to add number constants to the constant table here,
+                    // Need to add number constants to the constant table here,
                     // because not every constant is needed in the final bytecode,
                     // i.e. `return 1 + 2` should be resolved to only need the
                     // constant `3` (1 and 2 are not in the final bytecode)
-
-                    //const index = try self.putConstant(Constant{ .number = parsed });
-                    //_ = try self.emitABx(.loadk, reg, @intCast(u18, index));
-                    @panic("TODO");
+                    const index = try self.putConstant(Constant{ .number = e.value.?.number });
+                    _ = try self.emitABx(.loadk, reg, @intCast(u18, index));
                 },
                 .relocable => {
                     const instruction = self.getcode(e);
@@ -189,14 +187,14 @@ pub const Compiler = struct {
                     instructionABC.*.a = reg;
                 },
                 .nonreloc => {
-                    if (reg != e.val.?) {
+                    if (reg != e.value.?.reg) {
                         //_ = try self.emitABC(.move, reg, e.val.?, 0);
                     }
                 },
                 .@"void", .jmp => return, // nothing to do
                 else => unreachable,
             }
-            e.val = reg;
+            e.value = .{ .reg = reg };
             e.kind = .nonreloc;
         }
 
@@ -230,14 +228,30 @@ pub const Compiler = struct {
             )));
             return self.code.items.len - 1;
         }
+
+        pub fn putConstant(self: *Func, constant: Constant) Error!usize {
+            const result = try self.constants_map.getOrPut(constant);
+            if (result.found_existing) {
+                return result.entry.value;
+            } else {
+                result.entry.value = self.constants.items.len;
+                try self.constants.append(constant);
+                return result.entry.value;
+            }
+        }
     };
 
     pub const ExpDesc = struct {
         kind: Kind,
-        // TODO 'u' field (union of struct/lua_Number in PUC Lua)
-        val: ?isize = null,
+        value: ?Value = null,
         patch_list_exit_when_true: ?i32 = null,
         patch_list_exit_when_false: ?i32 = null,
+
+        pub const Value = union {
+            index: usize,
+            number: f64,
+            reg: u8,
+        };
 
         pub const Kind = enum {
             @"void", // no value
@@ -315,7 +329,7 @@ pub const Compiler = struct {
         try self.func.exp2nextreg(&self.func.cur_exp);
         const func_exp = self.func.cur_exp;
         std.debug.assert(func_exp.kind == .nonreloc);
-        const base: u8 = @intCast(u8, func_exp.val.?);
+        const base: u8 = @intCast(u8, func_exp.value.?.reg);
 
         for (call.arguments) |argument_node| {
             try self.genNode(argument_node);
@@ -348,19 +362,16 @@ pub const Compiler = struct {
                 const index = try self.putConstant(Constant{ .string = parsed });
                 self.func.cur_exp = .{
                     .kind = .index_of_constant,
-                    .val = @intCast(isize, index),
+                    .value = .{ .index = index },
                 };
             },
             .number => {
                 const number_source = self.source[literal.token.start..literal.token.end];
                 const parsed = zua.parse_literal.parseNumber(number_source);
-                const index = try self.putConstant(Constant{ .number = parsed });
-                try self.func.code.append(@bitCast(Instruction, InstructionABx.init(
-                    .loadk,
-                    // TODO: the field values are probably wrong, they just happen to line up for the hello world
-                    @intCast(u8, index),
-                    @intCast(u18, index),
-                )));
+                self.func.cur_exp = .{
+                    .kind = .number,
+                    .value = .{ .number = parsed },
+                };
             },
             .keyword_true => {
                 self.func.cur_exp = .{
@@ -387,26 +398,19 @@ pub const Compiler = struct {
         // TODO distinguish between global and local vars
         self.func.cur_exp = .{
             .kind = .global,
-            .val = @intCast(isize, index),
+            .value = .{ .index = index },
         };
     }
 
     pub fn putConstant(self: *Compiler, constant: Constant) Error!usize {
-        const result = try self.func.constants_map.getOrPut(constant);
-        if (result.found_existing) {
-            return result.entry.value;
-        } else {
-            result.entry.value = self.func.constants.items.len;
-            var final_constant = constant;
-            if (constant == .string) {
-                // dupe the string so that the resulting Function owns all the memory
-                // TODO how should this memory get cleaned up on compile error?
-                const dupe = try self.allocator.dupe(u8, constant.string);
-                final_constant = Constant{ .string = dupe };
-            }
-            try self.func.constants.append(final_constant);
-            return result.entry.value;
+        var final_constant = constant;
+        if (constant == .string and !self.func.constants_map.contains(constant)) {
+            // dupe the string so that the resulting Function owns all the memory
+            // TODO how should this memory get cleaned up on compile error?
+            const dupe = try self.allocator.dupe(u8, constant.string);
+            final_constant = Constant{ .string = dupe };
         }
+        return self.func.putConstant(final_constant);
     }
 };
 
@@ -473,4 +477,5 @@ test "compile hello world" {
 
 test "compile print multiple literals" {
     try testCompile("print(nil, true)");
+    try testCompile("print(nil, true, false, 1)");
 }

@@ -15,6 +15,10 @@ pub const Tree = struct {
         self.arena.promote(self.allocator).deinit();
     }
 
+    pub fn chunk(self: *Tree) *Node.Chunk {
+        return @fieldParentPtr(Node.Chunk, "base", self.node);
+    }
+
     pub fn dump(self: *Tree, writer: anytype) @TypeOf(writer).Error!void {
         try self.node.dump(writer, 0);
     }

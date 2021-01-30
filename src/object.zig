@@ -78,7 +78,7 @@ pub const Function = struct {
     code: []const Instruction,
     constants: []const Constant,
     varargs: Function.VarArgs = .{},
-    maxstacksize: u8,
+    max_stack_size: u8,
     num_params: u8 = 0,
     num_upvalues: u8 = 0,
     allocator: ?*Allocator = null,

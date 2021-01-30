@@ -2,6 +2,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 const opcodes = @import("opcodes.zig");
 const Instruction = opcodes.Instruction;
+const InstructionABC = opcodes.InstructionABC;
+const InstructionABx = opcodes.InstructionABx;
 const object = @import("object.zig");
 const Function = object.Function;
 const Constant = object.Constant;
@@ -36,7 +38,7 @@ pub fn writeFunction(function: Function, writer: anytype) @TypeOf(writer).Error!
     try writer.writeByte(function.num_upvalues);
     try writer.writeByte(function.num_params);
     try writer.writeByte(function.varargs.dump());
-    try writer.writeByte(function.maxstacksize);
+    try writer.writeByte(function.max_stack_size);
 
     // instructions
     try writer.writeIntNative(c_int, @intCast(c_int, function.code.len));
@@ -102,17 +104,10 @@ test "just return" {
     var chunk = Function{
         .name = "",
         .code = &[_]Instruction{
-            .{
-                .iABC = .{
-                    .op = .@"return",
-                    .A = 0,
-                    .B = 1,
-                    .C = 0,
-                },
-            },
+            @bitCast(Instruction, InstructionABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{},
-        .maxstacksize = 0,
+        .max_stack_size = 0,
     };
 
     try write(chunk, buf.writer());
@@ -126,42 +121,16 @@ test "hello world" {
         .allocator = null,
         .name = "",
         .code = &[_]Instruction{
-            .{
-                .iABx = .{
-                    .op = .getglobal,
-                    .A = 0,
-                    .Bx = 0,
-                },
-            },
-            .{
-                .iABx = .{
-                    .op = .loadk,
-                    .A = 1,
-                    .Bx = 1,
-                },
-            },
-            .{
-                .iABC = .{
-                    .op = .call,
-                    .A = 0,
-                    .B = 2,
-                    .C = 1,
-                },
-            },
-            .{
-                .iABC = .{
-                    .op = .@"return",
-                    .A = 0,
-                    .B = 1,
-                    .C = 0,
-                },
-            },
+            @bitCast(Instruction, InstructionABx.init(.getglobal, 0, 0)),
+            @bitCast(Instruction, InstructionABx.init(.loadk, 1, 1)),
+            @bitCast(Instruction, InstructionABC.init(.call, 0, 2, 1)),
+            @bitCast(Instruction, InstructionABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{
             Constant{ .string = "print" },
             Constant{ .string = "hello world" },
         },
-        .maxstacksize = 2,
+        .max_stack_size = 2,
     };
 
     try write(chunk, buf.writer());
@@ -175,14 +144,7 @@ test "constants" {
         .allocator = null,
         .name = "",
         .code = &[_]Instruction{
-            .{
-                .iABC = .{
-                    .op = .@"return",
-                    .A = 0,
-                    .B = 1,
-                    .C = 0,
-                },
-            },
+            @bitCast(Instruction, InstructionABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{
             Constant{ .string = "print" },
@@ -192,7 +154,7 @@ test "constants" {
             Constant.nil,
             Constant{ .number = 123 },
         },
-        .maxstacksize = 0,
+        .max_stack_size = 0,
     };
 
     try write(chunk, buf.writer());

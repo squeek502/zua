@@ -9,6 +9,7 @@ pub const opcodes = @import("opcodes.zig");
 pub const dump = @import("dump.zig");
 pub const compiler = @import("compiler.zig");
 pub const ast = @import("ast.zig");
+pub const debug = @import("debug.zig");
 
 pub fn main() void {}
 
@@ -22,4 +23,5 @@ test "zua" {
     _ = @import("dump.zig");
     _ = @import("compiler.zig");
     _ = @import("ast.zig");
+    _ = @import("debug.zig");
 }

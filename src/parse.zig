@@ -28,6 +28,9 @@ pub const max_local_vars_per_func = 200;
 /// LUAI_MAXCCALLS in luaconf.h
 pub const max_syntax_levels = 200;
 
+/// From llimits.h
+pub const max_stack_size = 250;
+
 pub const ParseError = error{
     FunctionArgumentsExpected,
     ExpectedEqualsOrIn,

@@ -147,7 +147,7 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
             .@"return" => {
                 const num_returns: i32 = b - 1;
                 if (num_returns > 0) {
-                    try checkreg(function, @intCast(usize, a + b - 1));
+                    try checkreg(function, @intCast(usize, a + num_returns - 1));
                 }
             },
             //.setlist => {},

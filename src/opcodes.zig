@@ -26,17 +26,42 @@ pub const OpCode = packed enum(u6) {
     call = 28,
     @"return" = 30,
 
+    pub fn InstructionType(op: OpCode) type {
+        return switch (op) {
+            .loadk => Instruction.LoadK,
+            .loadbool => Instruction.LoadBool,
+            .loadnil => Instruction.LoadNil,
+            .getglobal => Instruction.GetGlobal,
+            .call => Instruction.Call,
+            .@"return" => Instruction.Return,
+        };
+    }
+
     pub const OpMode = enum {
         iABC,
         iABx,
         iAsBx,
     };
 
+    // A mapping of OpCode -> OpMode
+    const op_modes = comptime blk: {
+        const max_fields = std.math.maxInt(@typeInfo(OpCode).Enum.tag_type);
+        var array: [max_fields]OpMode = undefined;
+        for (@typeInfo(OpCode).Enum.fields) |field| {
+            const Type = @field(OpCode, field.name).InstructionType();
+            const mode: OpMode = switch (@typeInfo(Type).Struct.fields[0].field_type) {
+                Instruction.ABC => .iABC,
+                Instruction.ABx => .iABx,
+                Instruction.AsBx => .iAsBx,
+                else => unreachable,
+            };
+            array[field.value] = mode;
+        }
+        break :blk array;
+    };
+
     pub fn getOpMode(self: OpCode) OpMode {
-        return switch (self) {
-            .loadk, .getglobal => .iABx,
-            .call, .@"return", .loadbool, .loadnil => .iABC,
-        };
+        return op_modes[@enumToInt(self)];
     }
 
     pub const OpArgMask = enum {
@@ -46,6 +71,7 @@ pub const OpCode = packed enum(u6) {
         ConstantOrRegisterConstant, // K
     };
 
+    // TODO possibly move all these types of mappings to the Instruction.* as was done in getOpMode
     pub fn getBMode(self: OpCode) OpArgMask {
         return switch (self) {
             .loadnil => .RegisterOrJumpOffset,
@@ -116,81 +142,179 @@ pub fn constantIndexToRK(val: u9) u9 {
     return val | bit_mask_constant;
 }
 
-// TODO use a packed union for fields (iABC and iBx as fields of a packed union)
-// once bit packing is implemented for packed unions
-
 /// To be bit-casted depending on the op field
 pub const Instruction = packed struct {
     op: OpCode,
     a: u8,
     fields: u18,
-};
 
-pub const InstructionABC = packed struct {
-    op: OpCode,
-    a: u8,
-    c: u9,
-    b: u9,
+    pub const ABC = packed struct {
+        op: OpCode,
+        a: u8,
+        c: u9,
+        b: u9,
 
-    pub fn init(op: OpCode, a: u8, b: u9, c: u9) InstructionABC {
-        return .{
-            .op = op,
-            .a = a,
-            .b = b,
-            .c = c,
-        };
-    }
-};
+        pub fn init(op: OpCode, a: u8, b: u9, c: u9) Instruction.ABC {
+            return .{
+                .op = op,
+                .a = a,
+                .b = b,
+                .c = c,
+            };
+        }
+    };
 
-pub const InstructionABx = packed struct {
-    op: OpCode,
-    a: u8,
-    bx: u18,
+    pub const ABx = packed struct {
+        op: OpCode,
+        a: u8,
+        bx: u18,
 
-    pub fn init(op: OpCode, a: u8, bx: u18) InstructionABx {
-        return .{
-            .op = op,
-            .a = a,
-            .bx = bx,
-        };
-    }
+        pub fn init(op: OpCode, a: u8, bx: u18) Instruction.ABx {
+            return .{
+                .op = op,
+                .a = a,
+                .bx = bx,
+            };
+        }
+    };
 
-    pub fn initSigned(op: OpCode, a: u8, sbx: i18) InstructionABx {
-        return init(op, a, signedBxToUnsigned(sbx));
-    }
+    pub const AsBx = packed struct {
+        op: OpCode,
+        a: u8,
+        /// Underscore in the name to make it hard to accidentally use this field directly.
+        /// Stored as unsigned for binary compatibility
+        _bx: u18,
 
-    pub fn getSignedBx(self: *const InstructionABx) i18 {
-        return unsignedBxToSigned(self.bx);
-    }
+        pub fn init(op: OpCode, a: u8, sbx: i18) Instruction.AsBx {
+            return .{
+                .op = op,
+                .a = a,
+                ._bx = bx,
+            };
+        }
 
-    pub fn setSignedBx(self: *InstructionABx, val: i18) void {
-        self.setBx(signedBxToUnsigned(val));
-    }
+        pub fn getSignedBx(self: *const Instruction.AsBx) i18 {
+            return unsignedBxToSigned(self._bx);
+        }
 
-    const max_bx = std.math.maxInt(u18);
-    const max_sbx = std.math.maxInt(i18);
-    /// Not std.math.minInt because of the subtraction stuff
-    const min_sbx = -max_sbx;
+        pub fn setSignedBx(self: *Instruction.AsBx, val: i18) void {
+            self._bx = signedBxToUnsigned(val);
+        }
 
-    pub fn unsignedBxToSigned(Bx: u18) i18 {
-        comptime const fitting_int = std.math.IntFittingRange(min_sbx, max_bx);
-        return @intCast(i18, @intCast(fitting_int, Bx) - max_sbx);
-    }
+        const max_bx = std.math.maxInt(u18);
+        const max_sbx = std.math.maxInt(i18);
+        // Not std.math.minInt because of the subtraction stuff
+        const min_sbx = -max_sbx;
 
-    pub fn signedBxToUnsigned(sBx: i18) u18 {
-        comptime const fitting_int = std.math.IntFittingRange(min_sbx, max_bx);
-        return @intCast(u18, @intCast(fitting_int, sBx) + max_sbx);
-    }
+        pub fn unsignedBxToSigned(Bx: u18) i18 {
+            comptime const fitting_int = std.math.IntFittingRange(min_sbx, max_bx);
+            return @intCast(i18, @intCast(fitting_int, Bx) - max_sbx);
+        }
+
+        pub fn signedBxToUnsigned(sBx: i18) u18 {
+            comptime const fitting_int = std.math.IntFittingRange(min_sbx, max_bx);
+            return @intCast(u18, @intCast(fitting_int, sBx) + max_sbx);
+        }
+    };
+
+    pub const LoadK = packed struct {
+        instruction: Instruction.ABx,
+    };
+
+    pub const LoadBool = packed struct {
+        instruction: Instruction.ABC,
+
+        pub fn init(reg: u8, val: bool, does_jump: bool) LoadBool {
+            return .{
+                .instruction = Instruction.ABC.init(
+                    .loadbool,
+                    reg,
+                    @boolToInt(val),
+                    @boolToInt(does_jump),
+                ),
+            };
+        }
+
+        pub fn doesJump(self: *const LoadBool) bool {
+            return self.instruction.c == 1;
+        }
+    };
+
+    pub const LoadNil = packed struct {
+        instruction: Instruction.ABC,
+    };
+
+    pub const GetGlobal = packed struct {
+        instruction: Instruction.ABx,
+    };
+
+    pub const Call = packed struct {
+        instruction: Instruction.ABC,
+
+        pub fn init(base: u8, num_params: u9, num_return_values: ?u9) Call {
+            const c_val = if (num_return_values != null) num_return_values.? + 1 else 0;
+            return .{
+                .instruction = Instruction.ABC.init(
+                    .call,
+                    base,
+                    num_params + 1,
+                    c_val,
+                ),
+            };
+        }
+
+        pub fn setNumReturnValues(self: *Call, num_return_values: ?u9) void {
+            if (num_return_values) |v| {
+                self.instruction.c = v + 1;
+            } else {
+                self.instruction.c = 0;
+            }
+        }
+
+        pub fn getNumReturnValues(self: *const Call) ?u9 {
+            if (self.isMultipleReturns()) return null;
+            return self.instruction.c - 1;
+        }
+
+        pub fn isMultipleReturns(self: *const Call) bool {
+            return self.instruction.c == 0;
+        }
+    };
+
+    pub const Return = packed struct {
+        instruction: Instruction.ABC,
+
+        pub fn init(first_return_value_register: u8, num_return_values: ?u9) Return {
+            const b_val = if (num_return_values != null) num_return_values.? + 1 else 0;
+            return .{
+                .instruction = Instruction.ABC.init(
+                    .@"return",
+                    first_return_value_register,
+                    b_val,
+                    0,
+                ),
+            };
+        }
+
+        pub fn getNumReturnValues(self: *const Return) ?u9 {
+            if (self.isMultipleReturns()) return null;
+            return self.instruction.b - 1;
+        }
+
+        pub fn isMultipleReturns(self: *const Return) bool {
+            return self.instruction.b == 0;
+        }
+    };
 };
 
 test "sBx" {
     std.testing.expectEqual(
-        @as(i18, InstructionABx.min_sbx),
-        InstructionABx.unsignedBxToSigned(0),
+        @as(i18, Instruction.AsBx.min_sbx),
+        Instruction.AsBx.unsignedBxToSigned(0),
     );
-    const max_sbx_as_bx = InstructionABx.signedBxToUnsigned(InstructionABx.max_sbx);
+    const max_sbx_as_bx = Instruction.AsBx.signedBxToUnsigned(Instruction.AsBx.max_sbx);
     std.testing.expectEqual(
-        @as(i18, InstructionABx.max_sbx),
-        InstructionABx.unsignedBxToSigned(max_sbx_as_bx),
+        @as(i18, Instruction.AsBx.max_sbx),
+        Instruction.AsBx.unsignedBxToSigned(max_sbx_as_bx),
     );
 }

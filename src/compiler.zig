@@ -2,8 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const zua = @import("zua.zig");
 const Instruction = zua.opcodes.Instruction;
-const InstructionABC = zua.opcodes.InstructionABC;
-const InstructionABx = zua.opcodes.InstructionABx;
 const Node = zua.ast.Node;
 const Function = zua.object.Function;
 const Constant = zua.object.Constant;
@@ -135,7 +133,7 @@ pub const Compiler = struct {
                 e.desc = .{ .nonreloc = .{ .result_register = instruction.a } };
             } else if (e.desc == .vararg) {
                 const instruction = self.getcode(e);
-                const instructionABC = @ptrCast(*InstructionABC, instruction);
+                const instructionABC = @ptrCast(*Instruction.ABC, instruction);
                 instructionABC.*.b = 2;
                 e.desc = .{ .relocable = .{ .instruction_index = e.desc.vararg.instruction_index } };
             }
@@ -186,7 +184,7 @@ pub const Compiler = struct {
                     _ = try self.emitABC(.loadnil, reg, 1, 0);
                 },
                 .@"false", .@"true" => {
-                    _ = try self.emitABC(.loadbool, reg, @boolToInt(e.desc == .@"true"), 0);
+                    _ = try self.emitInstruction(Instruction.LoadBool.init(reg, e.desc == .@"true", false));
                 },
                 .constant_index => {
                     _ = try self.emitABx(.loadk, reg, @intCast(u18, e.desc.constant_index));
@@ -201,7 +199,7 @@ pub const Compiler = struct {
                 },
                 .relocable => {
                     const instruction = self.getcode(e);
-                    const instructionABC = @ptrCast(*InstructionABC, instruction);
+                    const instructionABC = @ptrCast(*Instruction.ABC, instruction);
                     instructionABC.*.a = reg;
                 },
                 .nonreloc => {
@@ -215,35 +213,30 @@ pub const Compiler = struct {
             e.desc = .{ .nonreloc = .{ .result_register = reg } };
         }
 
-        // TODO better name for `first` param
         /// luaK_ret equivalent
-        pub fn emitReturn(self: *Func, first: u8, num_returns: u9) !usize {
-            return self.emitABC(.@"return", first, num_returns + 1, 0);
+        pub fn emitReturn(self: *Func, first_return_reg: u8, num_returns: u9) !usize {
+            return self.emitInstruction(Instruction.Return.init(first_return_reg, num_returns));
+        }
+
+        /// Appends a new instruction to the Func's code and returns the
+        /// index of the added instruction
+        pub fn emitInstruction(self: *Func, instruction: anytype) !usize {
+            try self.code.append(@bitCast(Instruction, instruction));
+            return self.code.items.len - 1;
         }
 
         /// Appends a new instruction to the Func's code and returns the
         /// index of the added instruction
         /// luaK_codeABC equivalent
         pub fn emitABC(self: *Func, op: OpCode, a: u8, b: u9, c: u9) !usize {
-            try self.code.append(@bitCast(Instruction, InstructionABC.init(
-                op,
-                a,
-                b,
-                c,
-            )));
-            return self.code.items.len - 1;
+            return self.emitInstruction(Instruction.ABC.init(op, a, b, c));
         }
 
         /// Appends a new instruction to the Func's code and returns the
         /// index of the added instruction
         /// luaK_codeABx equivalent
         pub fn emitABx(self: *Func, op: OpCode, a: u8, bx: u18) !usize {
-            try self.code.append(@bitCast(Instruction, InstructionABx.init(
-                op,
-                a,
-                bx,
-            )));
-            return self.code.items.len - 1;
+            return self.emitInstruction(Instruction.ABx.init(op, a, bx));
         }
 
         pub fn putConstant(self: *Func, constant: Constant) Error!usize {
@@ -396,14 +389,9 @@ pub const Compiler = struct {
             nparams = self.func.free_register - (base + 1);
         }
 
-        try self.func.code.append(
-            @bitCast(Instruction, InstructionABC.init(
-                .call,
-                @intCast(u8, base),
-                @intCast(u9, nparams + 1),
-                1, // 1 = no assignment, 2 = assignment TODO assignment
-            )),
-        );
+        // TODO assignment
+        _ = try self.func.emitInstruction(Instruction.Call.init(base, @intCast(u9, nparams), 0));
+
         // call removes function and arguments, and leaves (unless changed) one result
         self.func.free_register = base + 1;
     }

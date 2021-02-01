@@ -3,8 +3,6 @@ const zua = @import("zua.zig");
 const Function = zua.object.Function;
 const OpCode = zua.opcodes.OpCode;
 const Instruction = zua.opcodes.Instruction;
-const InstructionABC = zua.opcodes.InstructionABC;
-const InstructionABx = zua.opcodes.InstructionABx;
 const max_stack_size = zua.parse.max_stack_size;
 
 pub fn checkcode(function: *const Function) !void {
@@ -57,7 +55,7 @@ pub fn checkopenop(instruction: Instruction) !void {
         .@"return",
         //.setlist,
         => {
-            const b = @bitCast(InstructionABC, instruction).b;
+            const b = @bitCast(Instruction.ABC, instruction).b;
             if (b != 0) return error.InvalidInstructionAfterOpenCall;
         },
         else => return error.InvalidInstructionAfterOpenCall,
@@ -71,26 +69,26 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
     for (function.code) |instruction, i| {
         const a = instruction.a;
         var b: i32 = 0;
-        var c: i32 = 0;
+        var c: u9 = 0;
         try checkreg(function, a);
         switch (instruction.op.getOpMode()) {
             .iABC => {
-                const instructionABC = @bitCast(InstructionABC, instruction);
+                const instructionABC = @bitCast(Instruction.ABC, instruction);
                 b = instructionABC.b;
                 c = instructionABC.c;
                 try checkArgMode(function, b, instruction.op.getBMode());
                 try checkArgMode(function, c, instruction.op.getCMode());
             },
             .iABx => {
-                const instructionABx = @bitCast(InstructionABx, instruction);
+                const instructionABx = @bitCast(Instruction.ABx, instruction);
                 b = instructionABx.bx;
                 if (instruction.op.getBMode() == .ConstantOrRegisterConstant) {
                     if (b >= function.constants.len) return error.ConstantIndexOutOfRange;
                 }
             },
             .iAsBx => {
-                const instructionABx = @bitCast(InstructionABx, instruction);
-                b = instructionABx.getSignedBx();
+                const instructionAsBx = @bitCast(Instruction.AsBx, instruction);
+                b = instructionAsBx.getSignedBx();
                 if (instruction.op.getBMode() == .RegisterOrJumpOffset) {
                     @panic("TODO");
                 }
@@ -108,7 +106,8 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
         }
         switch (instruction.op) {
             .loadbool => {
-                if (c == 1) { // does it jump?
+                const bool_inst = @bitCast(Instruction.LoadBool, instruction);
+                if (bool_inst.doesJump()) {
                     if (i + 2 >= function.code.len) return error.ImpossibleLoadBoolInstructionPlacement;
                     //const next_instruction = function.code[i+1];
                     //const check = next_instruction.op != .setlist or next_instruction.(somehow get arg c) != 0;
@@ -131,23 +130,25 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
             //.forloop, .forprep => {},
             //.jmp => {},
             .call => {
+                const call_inst = @bitCast(Instruction.Call, instruction);
                 if (b != 0) {
                     try checkreg(function, @intCast(usize, a + b - 1));
                 }
-                const num_returns: i32 = c - 1;
-                if (num_returns == -1) { // TODO LUA_MULTRET
+                const num_returns = call_inst.getNumReturnValues();
+                if (call_inst.isMultipleReturns()) {
                     try checkopenop_next(function, i);
-                } else if (num_returns != 0) {
-                    try checkreg(function, @intCast(usize, a + num_returns - 1));
+                } else if (num_returns.? != 0) {
+                    try checkreg(function, @intCast(usize, a + num_returns.? - 1));
                 }
                 if (reg != null and reg.? >= a) {
                     last_instruction_that_changed_reg = i;
                 }
             },
             .@"return" => {
-                const num_returns: i32 = b - 1;
-                if (num_returns > 0) {
-                    try checkreg(function, @intCast(usize, a + num_returns - 1));
+                const ret_inst = @bitCast(Instruction.Return, instruction);
+                const num_returns = ret_inst.getNumReturnValues();
+                if (num_returns != null and num_returns.? > 0) {
+                    try checkreg(function, @intCast(usize, a + num_returns.? - 1));
                 }
             },
             //.setlist => {},

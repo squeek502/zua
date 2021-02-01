@@ -2,8 +2,6 @@ const builtin = @import("builtin");
 const std = @import("std");
 const opcodes = @import("opcodes.zig");
 const Instruction = opcodes.Instruction;
-const InstructionABC = opcodes.InstructionABC;
-const InstructionABx = opcodes.InstructionABx;
 const object = @import("object.zig");
 const Function = object.Function;
 const Constant = object.Constant;
@@ -104,7 +102,7 @@ test "just return" {
     var chunk = Function{
         .name = "",
         .code = &[_]Instruction{
-            @bitCast(Instruction, InstructionABC.init(.@"return", 0, 1, 0)),
+            @bitCast(Instruction, Instruction.ABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{},
         .max_stack_size = 0,
@@ -121,10 +119,10 @@ test "hello world" {
         .allocator = null,
         .name = "",
         .code = &[_]Instruction{
-            @bitCast(Instruction, InstructionABx.init(.getglobal, 0, 0)),
-            @bitCast(Instruction, InstructionABx.init(.loadk, 1, 1)),
-            @bitCast(Instruction, InstructionABC.init(.call, 0, 2, 1)),
-            @bitCast(Instruction, InstructionABC.init(.@"return", 0, 1, 0)),
+            @bitCast(Instruction, Instruction.ABx.init(.getglobal, 0, 0)),
+            @bitCast(Instruction, Instruction.ABx.init(.loadk, 1, 1)),
+            @bitCast(Instruction, Instruction.ABC.init(.call, 0, 2, 1)),
+            @bitCast(Instruction, Instruction.ABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{
             Constant{ .string = "print" },
@@ -144,7 +142,7 @@ test "constants" {
         .allocator = null,
         .name = "",
         .code = &[_]Instruction{
-            @bitCast(Instruction, InstructionABC.init(.@"return", 0, 1, 0)),
+            @bitCast(Instruction, Instruction.ABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{
             Constant{ .string = "print" },

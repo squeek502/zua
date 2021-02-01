@@ -87,6 +87,22 @@ pub const Compiler = struct {
             try self.exp2reg(e, self.free_register - 1);
         }
 
+        pub fn exp2anyreg(self: *Func, e: *ExpDesc) !u8 {
+            try self.dischargevars(e);
+            if (e.kind == .nonreloc) {
+                // exp is already in a register
+                if (!e.hasjumps()) return e.value.?.reg;
+                // reg is not a local?
+                if (e.value.?.reg >= self.nactvar) {
+                    try self.exp2reg(e, e.value.?.reg);
+                    return e.value.?.reg;
+                }
+            }
+
+            try self.exp2nextreg(e);
+            return e.value.?.reg;
+        }
+
         pub fn dischargevars(self: *Func, e: *ExpDesc) !void {
             switch (e.kind) {
                 .local_register => {
@@ -141,7 +157,7 @@ pub const Compiler = struct {
 
         pub fn getcode(self: *Func, e: *ExpDesc) *Instruction {
             // TODO some sanity checking
-            const index = @intCast(usize, e.value.?.index);
+            const index = e.value.?.index;
             return &self.code.items[index];
         }
 
@@ -317,11 +333,26 @@ pub const Compiler = struct {
         }
     }
 
+    // TODO this probably might not cut it for something like
+    // return 1 + 2
     pub fn genReturnStatement(self: *Compiler, return_statement: *Node.ReturnStatement) Error!void {
-        if (return_statement.values.len > 0) {
-            @panic("TODO multiple return values");
+        var first_return_reg: u8 = 0;
+        var num_return_values: u9 = @intCast(u9, return_statement.values.len);
+
+        for (return_statement.values) |value_node| {
+            // TODO hasmultret
+            try self.genNode(value_node);
+            if (return_statement.values.len == 1) {
+                first_return_reg = try self.func.exp2anyreg(&self.func.cur_exp);
+            } else {
+                try self.func.exp2nextreg(&self.func.cur_exp);
+            }
         }
-        _ = try self.func.emitReturn(0, 0);
+        if (return_statement.values.len > 1) {
+            first_return_reg = self.func.nactvar;
+            std.debug.assert(num_return_values == self.func.free_register - first_return_reg);
+        }
+        _ = try self.func.emitReturn(first_return_reg, num_return_values);
     }
 
     pub fn genCall(self: *Compiler, call: *Node.Call) Error!void {
@@ -478,4 +509,10 @@ test "compile hello world" {
 test "compile print multiple literals" {
     try testCompile("print(nil, true)");
     try testCompile("print(nil, true, false, 1)");
+}
+
+test "compile return statements" {
+    try testCompile("return");
+    try testCompile("return false");
+    try testCompile("return false, true, \"hello\"");
 }

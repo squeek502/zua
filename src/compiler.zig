@@ -57,7 +57,7 @@ pub const Compiler = struct {
     pub const Func = struct {
         max_stack_size: u8 = 2, // registers 0/1 are always valid
         free_register: u8 = 0, // TODO what should this type actually be?
-        cur_exp: ExpDesc = .{ .kind = .@"void" },
+        cur_exp: ExpDesc = .{ .desc = .{ .@"void" = {} } },
         code: std.ArrayList(Instruction),
         constants: std.ArrayList(Constant),
         constants_map: Constant.Map,
@@ -89,35 +89,35 @@ pub const Compiler = struct {
 
         pub fn exp2anyreg(self: *Func, e: *ExpDesc) !u8 {
             try self.dischargevars(e);
-            if (e.kind == .nonreloc) {
+            if (e.desc == .nonreloc) {
+                const reg = e.desc.nonreloc.result_register;
                 // exp is already in a register
-                if (!e.hasjumps()) return e.value.?.reg;
+                if (!e.hasjumps()) return reg;
                 // reg is not a local?
-                if (e.value.?.reg >= self.nactvar) {
-                    try self.exp2reg(e, e.value.?.reg);
-                    return e.value.?.reg;
+                if (reg >= self.nactvar) {
+                    try self.exp2reg(e, reg);
+                    return reg;
                 }
             }
 
             try self.exp2nextreg(e);
-            return e.value.?.reg;
+            return e.desc.nonreloc.result_register;
         }
 
         pub fn dischargevars(self: *Func, e: *ExpDesc) !void {
-            switch (e.kind) {
+            switch (e.desc) {
                 .local_register => {
-                    e.kind = .nonreloc;
+                    e.desc = .{ .nonreloc = .{ .result_register = e.desc.local_register } };
                 },
-                .upvalue => {
+                .upvalue_index => {
                     //const index = try self.emitABC(.getupval, 0, @intCast(u18, e.val.?), 0);
                     //e.val = @intCast(isize, index);
-                    e.kind = .relocable;
+                    e.desc = .{ .relocable = .{ .instruction_index = 0 } };
                     @panic("TODO");
                 },
                 .global => {
-                    const index = try self.emitABx(.getglobal, 0, @intCast(u18, e.value.?.index));
-                    e.value = .{ .index = index };
-                    e.kind = .relocable;
+                    const index = try self.emitABx(.getglobal, 0, @intCast(u18, e.desc.global.name_constant_index));
+                    e.desc = .{ .relocable = .{ .instruction_index = index } };
                 },
                 .indexed => {
                     @panic("TODO");
@@ -130,21 +130,20 @@ pub const Compiler = struct {
         }
 
         pub fn setoneret(self: *Func, e: *ExpDesc) !void {
-            if (e.kind == .call) {
-                e.kind = .nonreloc;
+            if (e.desc == .call) {
                 const instruction = self.getcode(e);
-                e.value = .{ .reg = instruction.a };
-            } else if (e.kind == .vararg) {
+                e.desc = .{ .nonreloc = .{ .result_register = instruction.a } };
+            } else if (e.desc == .vararg) {
                 const instruction = self.getcode(e);
                 const instructionABC = @ptrCast(*InstructionABC, instruction);
                 instructionABC.*.b = 2;
-                e.kind = .relocable;
+                e.desc = .{ .relocable = .{ .instruction_index = e.desc.vararg.instruction_index } };
             }
         }
 
         pub fn freeexp(self: *Func, e: *ExpDesc) !void {
-            if (e.kind == .nonreloc) {
-                self.freereg(e.value.?.reg);
+            if (e.desc == .nonreloc) {
+                self.freereg(e.desc.nonreloc.result_register);
             }
         }
 
@@ -156,45 +155,48 @@ pub const Compiler = struct {
         }
 
         pub fn getcode(self: *Func, e: *ExpDesc) *Instruction {
-            // TODO some sanity checking
-            const index = e.value.?.index;
+            const index: usize = switch (e.desc) {
+                .jmp, .relocable, .call, .vararg => |desc| desc.instruction_index,
+                else => unreachable,
+            };
             return &self.code.items[index];
         }
 
         pub fn exp2reg(self: *Func, e: *ExpDesc, reg: u8) !void {
             try self.discharge2reg(e, reg);
-            if (e.kind == .jmp) {
+            if (e.desc == .jmp) {
                 //self.concat(...)
                 @panic("TODO");
             }
             if (e.hasjumps()) {
                 @panic("TODO");
             }
-
-            e.patch_list_exit_when_true = null;
-            e.patch_list_exit_when_false = null;
-            e.value = .{ .reg = reg };
-            e.kind = .nonreloc;
+            e.* = .{
+                .desc = .{
+                    .nonreloc = .{ .result_register = reg },
+                },
+                .patch_list = null,
+            };
         }
 
         pub fn discharge2reg(self: *Func, e: *ExpDesc, reg: u8) !void {
             try self.dischargevars(e);
-            switch (e.kind) {
+            switch (e.desc) {
                 .nil => {
                     _ = try self.emitABC(.loadnil, reg, 1, 0);
                 },
                 .@"false", .@"true" => {
-                    _ = try self.emitABC(.loadbool, reg, @boolToInt(e.kind == .@"true"), 0);
+                    _ = try self.emitABC(.loadbool, reg, @boolToInt(e.desc == .@"true"), 0);
                 },
-                .index_of_constant => {
-                    _ = try self.emitABx(.loadk, reg, @intCast(u18, e.value.?.index));
+                .constant_index => {
+                    _ = try self.emitABx(.loadk, reg, @intCast(u18, e.desc.constant_index));
                 },
                 .number => {
-                    // Need to add number constants to the constant table here,
-                    // because not every constant is needed in the final bytecode,
-                    // i.e. `return 1 + 2` should be resolved to only need the
+                    // Need to add number constants to the constant table here instead of,
+                    // in genLiteral because not every constant is needed in the final
+                    // bytecode, i.e. `return 1 + 2` should be resolved to only need the
                     // constant `3` (1 and 2 are not in the final bytecode)
-                    const index = try self.putConstant(Constant{ .number = e.value.?.number });
+                    const index = try self.putConstant(Constant{ .number = e.desc.number });
                     _ = try self.emitABx(.loadk, reg, @intCast(u18, index));
                 },
                 .relocable => {
@@ -203,15 +205,14 @@ pub const Compiler = struct {
                     instructionABC.*.a = reg;
                 },
                 .nonreloc => {
-                    if (reg != e.value.?.reg) {
+                    if (reg != e.desc.nonreloc.result_register) {
                         //_ = try self.emitABC(.move, reg, e.val.?, 0);
                     }
                 },
                 .@"void", .jmp => return, // nothing to do
                 else => unreachable,
             }
-            e.value = .{ .reg = reg };
-            e.kind = .nonreloc;
+            e.desc = .{ .nonreloc = .{ .result_register = reg } };
         }
 
         // TODO better name for `first` param
@@ -258,38 +259,62 @@ pub const Compiler = struct {
     };
 
     pub const ExpDesc = struct {
-        kind: Kind,
-        value: ?Value = null,
-        patch_list_exit_when_true: ?i32 = null,
-        patch_list_exit_when_false: ?i32 = null,
-
-        pub const Value = union {
-            index: usize,
+        desc: union(ExpDesc.Kind) {
+            @"void": void,
+            nil: void,
+            @"true": void,
+            @"false": void,
+            constant_index: usize,
             number: f64,
-            reg: u8,
+            local_register: u8,
+            upvalue_index: usize,
+            global: struct {
+                name_constant_index: usize,
+            },
+            indexed: struct {
+                table_register: u8,
+                key_register_or_constant_index: u9,
+            },
+            jmp: InstructionIndex,
+            relocable: InstructionIndex,
+            nonreloc: struct {
+                result_register: u8,
+            },
+            call: InstructionIndex,
+            vararg: InstructionIndex,
+        },
+        // TODO the types here should be revisited
+        patch_list: ?struct {
+            exit_when_true: ?i32,
+            exit_when_false: ?i32,
+        } = null,
+
+        // A wrapper struct for usize so that it can have a descriptive name
+        // and each tag that uses it can share the same type
+        pub const InstructionIndex = struct {
+            instruction_index: usize,
         };
 
         pub const Kind = enum {
-            @"void", // no value
+            @"void",
             nil,
             @"true",
             @"false",
-            index_of_constant, // info = index of constant in `k'
-            number, // nval = numerical value
-            local_register, // info = local register
-            upvalue, // info = index of upvalue in `upvalues'
-            global, // info = index of table; aux = index of global name in `k'
-            indexed, // info = table register; aux = index register (or `k')
-            jmp, // info = instruction pc
-            relocable, // info = instruction pc
-            nonreloc, // info = result register
-            call, // info = instruction pc
-            vararg, // info = instruction pc
+            constant_index,
+            number,
+            local_register,
+            upvalue_index,
+            global,
+            indexed,
+            jmp,
+            relocable,
+            nonreloc,
+            call,
+            vararg,
         };
 
         pub fn hasjumps(self: *ExpDesc) bool {
-            // TODO
-            return false;
+            return self.patch_list != null;
         }
     };
 
@@ -359,8 +384,8 @@ pub const Compiler = struct {
         try self.genNode(call.expression);
         try self.func.exp2nextreg(&self.func.cur_exp);
         const func_exp = self.func.cur_exp;
-        std.debug.assert(func_exp.kind == .nonreloc);
-        const base: u8 = @intCast(u8, func_exp.value.?.reg);
+        std.debug.assert(func_exp.desc == .nonreloc);
+        const base: u8 = @intCast(u8, func_exp.desc.nonreloc.result_register);
 
         for (call.arguments) |argument_node| {
             try self.genNode(argument_node);
@@ -391,33 +416,21 @@ pub const Compiler = struct {
                 defer self.arena.free(buf);
                 const parsed = zua.parse_literal.parseString(string_source, buf);
                 const index = try self.putConstant(Constant{ .string = parsed });
-                self.func.cur_exp = .{
-                    .kind = .index_of_constant,
-                    .value = .{ .index = index },
-                };
+                self.func.cur_exp.desc = .{ .constant_index = index };
             },
             .number => {
                 const number_source = self.source[literal.token.start..literal.token.end];
                 const parsed = zua.parse_literal.parseNumber(number_source);
-                self.func.cur_exp = .{
-                    .kind = .number,
-                    .value = .{ .number = parsed },
-                };
+                self.func.cur_exp.desc = .{ .number = parsed };
             },
             .keyword_true => {
-                self.func.cur_exp = .{
-                    .kind = .@"true",
-                };
+                self.func.cur_exp.desc = .{ .@"true" = .{} };
             },
             .keyword_false => {
-                self.func.cur_exp = .{
-                    .kind = .@"false",
-                };
+                self.func.cur_exp.desc = .{ .@"false" = .{} };
             },
             .keyword_nil => {
-                self.func.cur_exp = .{
-                    .kind = .nil,
-                };
+                self.func.cur_exp.desc = .{ .nil = {} };
             },
             else => unreachable,
         }
@@ -427,10 +440,7 @@ pub const Compiler = struct {
         const name = self.source[node.token.start..node.token.end];
         const index = try self.putConstant(Constant{ .string = name });
         // TODO distinguish between global and local vars
-        self.func.cur_exp = .{
-            .kind = .global,
-            .value = .{ .index = index },
-        };
+        self.func.cur_exp.desc = .{ .global = .{ .name_constant_index = index } };
     }
 
     pub fn putConstant(self: *Compiler, constant: Constant) Error!usize {

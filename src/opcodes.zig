@@ -71,48 +71,42 @@ pub const OpCode = packed enum(u6) {
         ConstantOrRegisterConstant, // K
     };
 
-    // TODO possibly move all these types of mappings to the Instruction.* as was done in getOpMode
+    pub const OpMeta = struct {
+        b_mode: OpArgMask,
+        c_mode: OpArgMask,
+        test_a_mode: bool,
+        test_t_mode: bool,
+    };
+
+    const op_meta = comptime blk: {
+        const max_fields = std.math.maxInt(@typeInfo(OpCode).Enum.tag_type);
+        var array: [max_fields]*const OpMeta = undefined;
+        for (@typeInfo(OpCode).Enum.fields) |field| {
+            const Type = @field(OpCode, field.name).InstructionType();
+            const meta = &@field(Type, "meta");
+            array[field.value] = meta;
+        }
+        break :blk array;
+    };
+
     pub fn getBMode(self: OpCode) OpArgMask {
-        return switch (self) {
-            .loadnil => .RegisterOrJumpOffset,
-            .loadk, .getglobal => .ConstantOrRegisterConstant,
-            .call, .@"return", .loadbool => .Used,
-        };
+        return op_meta[@enumToInt(self)].b_mode;
     }
 
     pub fn getCMode(self: OpCode) OpArgMask {
-        return switch (self) {
-            .loadk, .getglobal => .NotUsed,
-            .call, .loadbool => .Used,
-            .@"return", .loadnil => .NotUsed,
-        };
+        return op_meta[@enumToInt(self)].c_mode;
     }
 
     // TODO rename
     /// instruction set register A
     pub fn testAMode(self: OpCode) bool {
-        return switch (self) {
-            .loadk => true,
-            .loadbool => true,
-            .loadnil => true,
-            .getglobal => true,
-            .call => true,
-            .@"return" => false,
-        };
+        return op_meta[@enumToInt(self)].test_a_mode;
     }
 
     // TODO rename
     /// operator is a test
     pub fn testTMode(self: OpCode) bool {
-        return switch (self) {
-            .loadk,
-            .loadbool,
-            .loadnil,
-            .getglobal,
-            .call,
-            .@"return",
-            => false,
-        };
+        return op_meta[@enumToInt(self)].test_t_mode;
     }
 };
 
@@ -219,10 +213,24 @@ pub const Instruction = packed struct {
 
     pub const LoadK = packed struct {
         instruction: Instruction.ABx,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .ConstantOrRegisterConstant,
+            .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
     };
 
     pub const LoadBool = packed struct {
         instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .Used,
+            .c_mode = .Used,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
 
         pub fn init(reg: u8, val: bool, does_jump: bool) LoadBool {
             return .{
@@ -242,14 +250,35 @@ pub const Instruction = packed struct {
 
     pub const LoadNil = packed struct {
         instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .RegisterOrJumpOffset,
+            .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
     };
 
     pub const GetGlobal = packed struct {
         instruction: Instruction.ABx,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .ConstantOrRegisterConstant,
+            .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
     };
 
     pub const Call = packed struct {
         instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .Used,
+            .c_mode = .Used,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
 
         pub fn init(base: u8, num_params: u9, num_return_values: ?u9) Call {
             const c_val = if (num_return_values != null) num_return_values.? + 1 else 0;
@@ -283,6 +312,13 @@ pub const Instruction = packed struct {
 
     pub const Return = packed struct {
         instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .Used,
+            .c_mode = .NotUsed,
+            .test_a_mode = false,
+            .test_t_mode = false,
+        };
 
         pub fn init(first_return_value_register: u8, num_return_values: ?u9) Return {
             const b_val = if (num_return_values != null) num_return_values.? + 1 else 0;

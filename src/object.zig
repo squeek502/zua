@@ -119,6 +119,50 @@ pub const Function = struct {
         self.allocator.?.free(self.constants);
         self.allocator.?.free(self.code);
     }
+
+    pub fn printCode(self: *Function) void {
+        // TODO this is an (incomplete) direct port of the function PrintFunction in print.c
+        // It could be cleaned up a lot.
+        for (self.code) |instruction, i| {
+            const op = instruction.op;
+            var a: i32 = instruction.a;
+            var b: i32 = @bitCast(Instruction.ABC, instruction).b;
+            var c: i32 = @bitCast(Instruction.ABC, instruction).c;
+            var bx: i32 = @bitCast(Instruction.ABx, instruction).bx;
+            var sbx: i32 = @bitCast(Instruction.AsBx, instruction).getSignedBx();
+            std.debug.print("\t{d}\t", .{i + 1});
+            std.debug.print("[-]\t", .{}); // TODO line number
+            std.debug.print("{}\t", .{op});
+            switch (op.getOpMode()) {
+                .iABC => {
+                    std.debug.print("{d}", .{a});
+                    if (op.getBMode() != .NotUsed) {
+                        var b_for_display: i32 = if (zua.opcodes.isConstant(@intCast(u9, b)))
+                            (-1 - @intCast(i32, zua.opcodes.getConstantIndex(@intCast(u9, b))))
+                        else
+                            b;
+                        std.debug.print(" {d}", .{b_for_display});
+                    }
+                    if (op.getCMode() != .NotUsed) {
+                        var c_for_display: i32 = if (zua.opcodes.isConstant(@intCast(u9, c)))
+                            (-1 - @intCast(i32, zua.opcodes.getConstantIndex(@intCast(u9, c))))
+                        else
+                            c;
+                        std.debug.print(" {d}", .{c_for_display});
+                    }
+                },
+                .iABx => {
+                    if (op.getBMode() == .ConstantOrRegisterConstant) {
+                        std.debug.print("{d} {d}", .{ a, -1 - bx });
+                    } else {
+                        std.debug.print("{d} {d}", .{ a, bx });
+                    }
+                },
+                .iAsBx => {},
+            }
+            std.debug.print("\n", .{});
+        }
+    }
 };
 
 pub const Constant = union(Constant.Type) {

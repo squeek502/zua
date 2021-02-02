@@ -19,6 +19,7 @@ const std = @import("std");
 
 pub const OpCode = packed enum(u6) {
     // TODO: rest of the opcodes
+    move = 0,
     loadk = 1,
     loadbool = 2,
     loadnil = 3,
@@ -28,6 +29,7 @@ pub const OpCode = packed enum(u6) {
 
     pub fn InstructionType(op: OpCode) type {
         return switch (op) {
+            .move => Instruction.Move,
             .loadk => Instruction.LoadK,
             .loadbool => Instruction.LoadBool,
             .loadnil => Instruction.LoadNil,
@@ -209,6 +211,17 @@ pub const Instruction = packed struct {
             comptime const fitting_int = std.math.IntFittingRange(min_sbx, max_bx);
             return @intCast(u18, @intCast(fitting_int, sBx) + max_sbx);
         }
+    };
+
+    pub const Move = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .RegisterOrJumpOffset,
+            .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
     };
 
     pub const LoadK = packed struct {

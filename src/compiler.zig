@@ -9,6 +9,10 @@ const Lexer = zua.lex.Lexer;
 const Parser = zua.parse.Parser;
 const max_stack_size = zua.parse.max_stack_size;
 const OpCode = zua.opcodes.OpCode;
+const Token = zua.lex.Token;
+
+/// LUAI_MAXVARS from lconf.h
+pub const max_vars = 200;
 
 pub fn compile(allocator: *Allocator, source: []const u8) !Function {
     var lexer = Lexer.init(source, source);
@@ -61,7 +65,15 @@ pub const Compiler = struct {
         constants_map: Constant.Map,
         varargs: Function.VarArgs,
         prev: ?*Func,
-        nactvar: u8 = 0, // TODO what is this?
+        num_active_local_vars: u8 = 0,
+        active_local_vars: [max_vars]usize = undefined,
+        local_vars: std.ArrayList(LocalVar),
+
+        pub const LocalVar = struct {
+            name_token: Token,
+            active_instruction_index: usize,
+            dead_instruction_index: usize,
+        };
 
         pub fn checkstack(self: *Func, n: u8) !void {
             const newstack = self.free_register + n;
@@ -92,7 +104,7 @@ pub const Compiler = struct {
                 // exp is already in a register
                 if (!e.hasjumps()) return reg;
                 // reg is not a local?
-                if (reg >= self.nactvar) {
+                if (reg >= self.num_active_local_vars) {
                     try self.exp2reg(e, reg);
                     return reg;
                 }
@@ -105,7 +117,8 @@ pub const Compiler = struct {
         pub fn dischargevars(self: *Func, e: *ExpDesc) !void {
             switch (e.desc) {
                 .local_register => {
-                    e.desc = .{ .nonreloc = .{ .result_register = e.desc.local_register } };
+                    const reg = e.desc.local_register;
+                    e.desc = .{ .nonreloc = .{ .result_register = reg } };
                 },
                 .upvalue_index => {
                     //const index = try self.emitABC(.getupval, 0, @intCast(u18, e.val.?), 0);
@@ -146,7 +159,7 @@ pub const Compiler = struct {
         }
 
         pub fn freereg(self: *Func, reg: u8) void {
-            if (!zua.opcodes.isConstant(reg) and reg >= self.nactvar) {
+            if (!zua.opcodes.isConstant(reg) and reg >= self.num_active_local_vars) {
                 self.free_register -= 1;
                 std.debug.assert(reg == self.free_register);
             }
@@ -181,7 +194,7 @@ pub const Compiler = struct {
             try self.dischargevars(e);
             switch (e.desc) {
                 .nil => {
-                    _ = try self.emitABC(.loadnil, reg, 1, 0);
+                    _ = try self.emitNil(reg, 1);
                 },
                 .@"false", .@"true" => {
                     _ = try self.emitInstruction(Instruction.LoadBool.init(reg, e.desc == .@"true", false));
@@ -204,7 +217,8 @@ pub const Compiler = struct {
                 },
                 .nonreloc => {
                     if (reg != e.desc.nonreloc.result_register) {
-                        //_ = try self.emitABC(.move, reg, e.val.?, 0);
+                        const result_register = e.desc.nonreloc.result_register;
+                        _ = try self.emitABC(.move, reg, result_register, 0);
                     }
                 },
                 .@"void", .jmp => return, // nothing to do
@@ -218,11 +232,29 @@ pub const Compiler = struct {
             return self.emitInstruction(Instruction.Return.init(first_return_reg, num_returns));
         }
 
+        // TODO better param names
+        pub fn emitNil(self: *Func, from: u8, n: usize) !?usize {
+            // TODO other branches
+            if (true) { // TODO fs->pc > fs->lasttarget
+                if (self.pc() == 0) { // function start?
+                    if (from >= self.num_active_local_vars) {
+                        return null; // positions are already clean
+                    }
+                }
+            }
+            const b = @intCast(u9, from + n - 1);
+            if (self.emitInstruction(Instruction.ABC.init(.loadnil, from, b, 0))) |index| {
+                return index;
+            } else |err| {
+                return err;
+            }
+        }
+
         /// Appends a new instruction to the Func's code and returns the
         /// index of the added instruction
         pub fn emitInstruction(self: *Func, instruction: anytype) !usize {
             try self.code.append(@bitCast(Instruction, instruction));
-            return self.code.items.len - 1;
+            return self.pc() - 1;
         }
 
         /// Appends a new instruction to the Func's code and returns the
@@ -248,6 +280,91 @@ pub const Compiler = struct {
                 try self.constants.append(constant);
                 return result.entry.value;
             }
+        }
+
+        pub fn new_localvar(self: *Func, name_token: Token, var_index: usize) Error!void {
+            const active_local_var_index = self.num_active_local_vars + var_index;
+            if (active_local_var_index >= max_vars) {
+                @panic("TODO too many local vars error");
+            }
+            self.active_local_vars[active_local_var_index] = try self.registerlocalvar(name_token);
+        }
+
+        pub fn registerlocalvar(self: *Func, name_token: Token) Error!usize {
+            try self.local_vars.append(.{
+                .name_token = name_token,
+                // to be filled in later
+                .active_instruction_index = undefined,
+                .dead_instruction_index = undefined,
+            });
+            return self.local_vars.items.len - 1;
+        }
+
+        pub fn adjust_assign(self: *Func, num_vars: usize, num_values: usize, e: *ExpDesc) !void {
+            var extra: isize = @intCast(isize, num_vars) - @intCast(isize, num_values);
+            if (e.hasmultret()) {
+                extra += 1;
+                if (extra < 0) extra = 0;
+                //try self.setreturns(e, extra);
+                if (extra > 1) {
+                    try self.reserveregs(@intCast(u8, extra - 1));
+                }
+                @panic("TODO");
+            } else {
+                if (e.desc != .@"void") {
+                    try self.exp2nextreg(e);
+                }
+                if (extra > 0) {
+                    const reg = self.free_register;
+                    try self.reserveregs(@intCast(u8, extra));
+                    _ = try self.emitNil(reg, @intCast(usize, extra));
+                }
+            }
+        }
+
+        pub fn adjustlocalvars(self: *Func, num_vars: usize) !void {
+            self.num_active_local_vars += @intCast(u8, num_vars);
+            var num_vars_remaining = num_vars;
+            while (num_vars_remaining > 0) : (num_vars_remaining -= 1) {
+                const local_var = self.getlocvar(self.num_active_local_vars - num_vars_remaining);
+                local_var.active_instruction_index = self.pc();
+            }
+        }
+
+        pub fn removevars(self: *Func, to_level: u8) !void {
+            while (self.num_active_local_vars > to_level) {
+                self.num_active_local_vars -= 1;
+                const local_var = self.getlocvar(self.num_active_local_vars);
+                local_var.dead_instruction_index = self.pc();
+            }
+        }
+
+        pub fn getlocvar(self: *Func, active_local_var_index: usize) *LocalVar {
+            const local_var_index = self.active_local_vars[active_local_var_index];
+            return &self.local_vars.items[active_local_var_index];
+        }
+
+        /// searchvar equivalent
+        /// Returns the index to the active local var, if found
+        pub fn findLocalVarByToken(self: *Func, name_token: Token, source: []const u8) ?usize {
+            if (self.num_active_local_vars == 0) return null;
+
+            const name_to_find = source[name_token.start..name_token.end];
+            var i: usize = self.num_active_local_vars - 1;
+            while (true) : (i -= 1) {
+                const cur_name_token = self.getlocvar(i).name_token;
+                const cur_name = source[cur_name_token.start..cur_name_token.end];
+                if (std.mem.eql(u8, cur_name, name_to_find)) {
+                    return i;
+                }
+                if (i == 0) break;
+            }
+            return null;
+        }
+
+        /// Current instruction pointer
+        pub fn pc(self: *Func) usize {
+            return self.code.items.len;
         }
     };
 
@@ -309,6 +426,10 @@ pub const Compiler = struct {
         pub fn hasjumps(self: *ExpDesc) bool {
             return self.patch_list != null;
         }
+
+        pub fn hasmultret(self: *ExpDesc) bool {
+            return self.desc == .call or self.desc == .vararg;
+        }
     };
 
     pub fn genChunk(self: *Compiler, chunk: *Node.Chunk) Error!*Func {
@@ -317,6 +438,7 @@ pub const Compiler = struct {
             .code = std.ArrayList(Instruction).init(self.arena),
             .constants = std.ArrayList(Constant).init(self.arena),
             .constants_map = Constant.Map.init(self.arena),
+            .local_vars = std.ArrayList(Func.LocalVar).init(self.arena),
             .varargs = .{ .is_var_arg = true }, // main func is always vararg
             .prev = null,
         };
@@ -325,11 +447,14 @@ pub const Compiler = struct {
 
         for (chunk.body) |node| {
             try self.genNode(node);
-        }
-        std.debug.assert(self.func.max_stack_size >= self.func.free_register);
-        std.debug.assert(self.func.free_register >= self.func.nactvar);
 
-        self.func.free_register = self.func.nactvar;
+            std.debug.assert(self.func.max_stack_size >= self.func.free_register);
+            std.debug.assert(self.func.free_register >= self.func.num_active_local_vars);
+
+            self.func.free_register = self.func.num_active_local_vars;
+        }
+
+        try self.func.removevars(0);
 
         // In the PUC Lua implementation, this final return is added in close_func.
         // It is added regardless of whether or not there is already a return, e.g.
@@ -344,10 +469,36 @@ pub const Compiler = struct {
         switch (node.id) {
             .chunk => unreachable, // should call genChunk directly, it should always be the root of a tree
             .call => try self.genCall(@fieldParentPtr(Node.Call, "base", node)),
+            .assignment_statement => try self.genAssignmentStatement(@fieldParentPtr(Node.AssignmentStatement, "base", node)),
             .literal => try self.genLiteral(@fieldParentPtr(Node.Literal, "base", node)),
             .identifier => try self.genIdentifier(@fieldParentPtr(Node.Identifier, "base", node)),
             .return_statement => try self.genReturnStatement(@fieldParentPtr(Node.ReturnStatement, "base", node)),
             else => unreachable, // TODO
+        }
+    }
+
+    pub fn genAssignmentStatement(self: *Compiler, assignment_statement: *Node.AssignmentStatement) Error!void {
+        if (assignment_statement.is_local) {
+            for (assignment_statement.variables) |variable_node, i| {
+                // we can be certain that this is an identifier when assigning with the local keyword
+                const identifier_node = @fieldParentPtr(Node.Identifier, "base", variable_node);
+                const name_token = identifier_node.token;
+                try self.func.new_localvar(name_token, i);
+            }
+            for (assignment_statement.values) |value_node, i| {
+                try self.genNode(value_node);
+                // skip the last one
+                if (i != assignment_statement.values.len - 1) {
+                    try self.func.exp2nextreg(&self.func.cur_exp);
+                }
+            }
+            if (assignment_statement.values.len == 0) {
+                self.func.cur_exp = .{
+                    .desc = .{ .@"void" = {} },
+                };
+            }
+            try self.func.adjust_assign(assignment_statement.variables.len, assignment_statement.values.len, &self.func.cur_exp);
+            try self.func.adjustlocalvars(assignment_statement.variables.len);
         }
     }
 
@@ -367,7 +518,7 @@ pub const Compiler = struct {
             }
         }
         if (return_statement.values.len > 1) {
-            first_return_reg = self.func.nactvar;
+            first_return_reg = self.func.num_active_local_vars;
             std.debug.assert(num_return_values == self.func.free_register - first_return_reg);
         }
         _ = try self.func.emitReturn(first_return_reg, num_return_values);
@@ -425,10 +576,15 @@ pub const Compiler = struct {
     }
 
     pub fn genIdentifier(self: *Compiler, node: *Node.Identifier) Error!void {
-        const name = self.source[node.token.start..node.token.end];
-        const index = try self.putConstant(Constant{ .string = name });
-        // TODO distinguish between global and local vars
-        self.func.cur_exp.desc = .{ .global = .{ .name_constant_index = index } };
+        if (self.func.findLocalVarByToken(node.token, self.source)) |active_local_var_index| {
+            self.func.cur_exp = .{ .desc = .{ .local_register = @intCast(u8, active_local_var_index) } };
+            // TODO if (!base) markupval()
+        } else {
+            // TODO upvalues
+            const name = self.source[node.token.start..node.token.end];
+            const index = try self.putConstant(Constant{ .string = name });
+            self.func.cur_exp = .{ .desc = .{ .global = .{ .name_constant_index = index } } };
+        }
     }
 
     pub fn putConstant(self: *Compiler, constant: Constant) Error!usize {
@@ -497,6 +653,8 @@ fn testCompile(source: []const u8) !void {
     const luacDump = try getLuacDump(std.testing.allocator, source);
     defer std.testing.allocator.free(luacDump);
 
+    //chunk.printCode();
+
     std.testing.expectEqualSlices(u8, luacDump, buf.items);
 }
 
@@ -513,4 +671,15 @@ test "compile return statements" {
     try testCompile("return");
     try testCompile("return false");
     try testCompile("return false, true, \"hello\"");
+}
+
+test "compile local statements" {
+    try testCompile("local a = 1");
+    try testCompile(
+        \\local a = "hello world"
+        \\print(a)
+    );
+    try testCompile("local a, b");
+    try testCompile("local a, b = 1");
+    try testCompile("local a, b = 1, 2, 3");
 }

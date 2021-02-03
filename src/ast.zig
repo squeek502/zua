@@ -97,6 +97,7 @@ pub const Node = struct {
         arguments: []*Node,
         open_args_token: ?Token,
         close_args_token: ?Token,
+        is_statement: bool = false,
     };
 
     pub const Literal = struct {

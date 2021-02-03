@@ -752,8 +752,11 @@ pub const Parser = struct {
     /// stat -> func | assignment
     fn exprstat(self: *Self) Error!*Node {
         var expression = try self.primaryexp();
-        // if it's not a call, then it's an assignment
-        if (expression.node.id != .call) {
+        if (expression.node.id == .call) {
+            const call_node = @fieldParentPtr(Node.Call, "base", expression.node);
+            call_node.is_statement = true;
+        } else {
+            // if it's not a call, then it's an assignment
             expression.node = try self.assignment(expression);
         }
         return expression.node;

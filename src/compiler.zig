@@ -305,11 +305,10 @@ pub const Compiler = struct {
             if (e.hasmultret()) {
                 extra += 1;
                 if (extra < 0) extra = 0;
-                //try self.setreturns(e, extra);
+                try self.setreturns(e, @intCast(u9, extra));
                 if (extra > 1) {
                     try self.reserveregs(@intCast(u8, extra - 1));
                 }
-                @panic("TODO");
             } else {
                 if (e.desc != .@"void") {
                     try self.exp2nextreg(e);
@@ -319,6 +318,15 @@ pub const Compiler = struct {
                     try self.reserveregs(@intCast(u8, extra));
                     _ = try self.emitNil(reg, @intCast(usize, extra));
                 }
+            }
+        }
+
+        pub fn setreturns(self: *Func, e: *ExpDesc, num_results: u9) !void {
+            if (e.desc == .call) {
+                const instruction = @ptrCast(*Instruction.Call, self.getcode(e));
+                instruction.setNumReturnValues(num_results);
+            } else if (e.desc == .vararg) {
+                @panic("TODO");
             }
         }
 
@@ -540,8 +548,10 @@ pub const Compiler = struct {
             nparams = self.func.free_register - (base + 1);
         }
 
-        // TODO assignment
-        _ = try self.func.emitInstruction(Instruction.Call.init(base, @intCast(u9, nparams), 0));
+        // assume 1 return value if this is not a statement, will be modified as necessary later
+        const num_return_values: u9 = if (call.is_statement) 0 else 1;
+        const index = try self.func.emitInstruction(Instruction.Call.init(base, @intCast(u9, nparams), num_return_values));
+        self.func.cur_exp = .{ .desc = .{ .call = .{ .instruction_index = index } } };
 
         // call removes function and arguments, and leaves (unless changed) one result
         self.func.free_register = base + 1;
@@ -682,4 +692,14 @@ test "compile local statements" {
     try testCompile("local a, b");
     try testCompile("local a, b = 1");
     try testCompile("local a, b = 1, 2, 3");
+}
+
+test "assignment from function return values" {
+    try testCompile("local a = f()");
+    try testCompile(
+        \\local a = f()
+        \\print(a)
+    );
+    try testCompile("local a, b = f()");
+    try testCompile("local a, b = f(), g()");
 }

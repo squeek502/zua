@@ -389,7 +389,16 @@ pub const Compiler = struct {
             try self.exp2val(e);
             switch (e.desc) {
                 .number, .@"true", .@"false", .nil => {
-                    @panic("TODO");
+                    if (self.constants.items.len <= zua.opcodes.max_constant_index) {
+                        var constant: Constant = switch (e.desc) {
+                            .nil => Constant{ .nil = {} },
+                            .@"true", .@"false" => Constant{ .boolean = e.desc == .@"true" },
+                            .number => Constant{ .number = e.desc.number },
+                            else => unreachable,
+                        };
+                        const index = try self.putConstant(constant);
+                        return zua.opcodes.constantIndexToRK(@intCast(u9, index));
+                    }
                 },
                 .constant_index => {
                     if (e.desc.constant_index <= zua.opcodes.max_constant_index) {
@@ -526,6 +535,7 @@ pub const Compiler = struct {
             .identifier => try self.genIdentifier(@fieldParentPtr(Node.Identifier, "base", node)),
             .return_statement => try self.genReturnStatement(@fieldParentPtr(Node.ReturnStatement, "base", node)),
             .field_access => try self.genFieldAccess(@fieldParentPtr(Node.FieldAccess, "base", node)),
+            .index_access => try self.genIndexAccess(@fieldParentPtr(Node.IndexAccess, "base", node)),
             else => unreachable, // TODO
         }
     }
@@ -651,13 +661,28 @@ pub const Compiler = struct {
             @panic("TODO self call");
         } else {
             try self.genNode(node.prefix);
+            _ = try self.func.exp2anyreg(&self.func.cur_exp);
 
             const name = self.source[node.field.start..node.field.end];
             const constant_index = try self.putConstant(Constant{ .string = name });
             var key = ExpDesc{ .desc = .{ .constant_index = constant_index } };
-            _ = try self.func.exp2anyreg(&self.func.cur_exp);
             try self.func.indexed(&self.func.cur_exp, &key);
         }
+    }
+
+    pub fn genIndexAccess(self: *Compiler, node: *Node.IndexAccess) Error!void {
+        try self.genNode(node.prefix);
+        _ = try self.func.exp2anyreg(&self.func.cur_exp);
+        var table_exp = self.func.cur_exp;
+
+        // reset and then restore afterwards
+        self.func.cur_exp = ExpDesc{ .desc = .{ .@"void" = {} } };
+
+        try self.genNode(node.index);
+        try self.func.exp2val(&self.func.cur_exp);
+        try self.func.indexed(&table_exp, &self.func.cur_exp);
+
+        self.func.cur_exp = table_exp;
     }
 
     pub fn putConstant(self: *Compiler, constant: Constant) Error!usize {
@@ -778,5 +803,7 @@ test "vararg" {
 
 test "gettable" {
     try testCompile("a.b()");
-    try testCompile("a.b(c.d)");
+    try testCompile("a.b(c.a)");
+    try testCompile("a[true]()");
+    try testCompile("a[1]()");
 }

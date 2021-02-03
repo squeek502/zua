@@ -423,6 +423,20 @@ pub const Compiler = struct {
             };
         }
 
+        /// luaK_self equivalent
+        pub fn handleSelf(self: *Func, e: *ExpDesc, key: *ExpDesc) !void {
+            _ = try self.exp2anyreg(e);
+            try self.freeexp(e);
+            const func_reg = self.free_register;
+            try self.reserveregs(2);
+            // TODO can this be a different type?
+            const result_register = e.desc.nonreloc.result_register;
+            const key_rk = try self.exp2RK(key);
+            _ = try self.emitABC(.self, func_reg, result_register, key_rk);
+            try self.freeexp(key);
+            e.desc = .{ .nonreloc = .{ .result_register = func_reg } };
+        }
+
         /// Current instruction pointer
         pub fn pc(self: *Func) usize {
             return self.code.items.len;
@@ -589,7 +603,14 @@ pub const Compiler = struct {
 
     pub fn genCall(self: *Compiler, call: *Node.Call) Error!void {
         try self.genNode(call.expression);
-        try self.func.exp2nextreg(&self.func.cur_exp);
+        var is_self_call = false;
+        if (call.expression.id == .field_access) {
+            const field_access_node = @fieldParentPtr(Node.FieldAccess, "base", call.expression);
+            is_self_call = field_access_node.separator.isChar(':');
+        }
+        if (!is_self_call) {
+            try self.func.exp2nextreg(&self.func.cur_exp);
+        }
         const func_exp = self.func.cur_exp;
         std.debug.assert(func_exp.desc == .nonreloc);
         const base: u8 = @intCast(u8, func_exp.desc.nonreloc.result_register);
@@ -598,10 +619,7 @@ pub const Compiler = struct {
             try self.genNode(argument_node);
             try self.func.exp2nextreg(&self.func.cur_exp);
         }
-        var nparams: usize = 0;
-        if (call.arguments.len > 0) {
-            nparams = self.func.free_register - (base + 1);
-        }
+        var nparams = self.func.free_register - (base + 1);
 
         // assume 1 return value if this is not a statement, will be modified as necessary later
         const num_return_values: u9 = if (call.is_statement) 0 else 1;
@@ -658,7 +676,13 @@ pub const Compiler = struct {
 
     pub fn genFieldAccess(self: *Compiler, node: *Node.FieldAccess) Error!void {
         if (node.separator.isChar(':')) {
-            @panic("TODO self call");
+            try self.genNode(node.prefix);
+
+            const name = self.source[node.field.start..node.field.end];
+            const constant_index = try self.putConstant(Constant{ .string = name });
+            var key = ExpDesc{ .desc = .{ .constant_index = constant_index } };
+
+            try self.func.handleSelf(&self.func.cur_exp, &key);
         } else {
             try self.genNode(node.prefix);
             _ = try self.func.exp2anyreg(&self.func.cur_exp);
@@ -751,6 +775,7 @@ fn testCompile(source: []const u8) !void {
     const luacDump = try getLuacDump(std.testing.allocator, source);
     defer std.testing.allocator.free(luacDump);
 
+    //std.debug.print("\n\n", .{});
     //chunk.printCode();
 
     std.testing.expectEqualSlices(u8, luacDump, buf.items);
@@ -806,4 +831,9 @@ test "gettable" {
     try testCompile("a.b(c.a)");
     try testCompile("a[true]()");
     try testCompile("a[1]()");
+}
+
+test "self" {
+    try testCompile("a:b()");
+    try testCompile("a:b(1,2,3)");
 }

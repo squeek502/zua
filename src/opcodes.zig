@@ -25,6 +25,7 @@ pub const OpCode = packed enum(u6) {
     loadnil = 3,
     getglobal = 5,
     gettable = 6,
+    self = 11,
     call = 28,
     @"return" = 30,
     vararg = 37,
@@ -37,6 +38,7 @@ pub const OpCode = packed enum(u6) {
             .loadnil => Instruction.LoadNil,
             .getglobal => Instruction.GetGlobal,
             .gettable => Instruction.GetTable,
+            .self => Instruction.Self,
             .call => Instruction.Call,
             .@"return" => Instruction.Return,
             .vararg => Instruction.VarArg,
@@ -288,6 +290,17 @@ pub const Instruction = packed struct {
     };
 
     pub const GetTable = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .RegisterOrJumpOffset,
+            .c_mode = .ConstantOrRegisterConstant,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
+    };
+
+    pub const Self = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{

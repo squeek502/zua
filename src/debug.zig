@@ -124,7 +124,12 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 const constant = function.constants[@intCast(usize, b)];
                 if (constant != .string) return error.ExpectedStringForGetOrSetGlobal;
             },
-            //.self => {},
+            .self => {
+                try checkreg(function, a + 1);
+                if (reg != null and reg.? == a + 1) {
+                    last_instruction_that_changed_reg = i;
+                }
+            },
             //.concat => {},
             //.tforloop => {},
             //.forloop, .forprep => {},

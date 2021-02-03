@@ -24,6 +24,7 @@ pub const OpCode = packed enum(u6) {
     loadbool = 2,
     loadnil = 3,
     getglobal = 5,
+    gettable = 6,
     call = 28,
     @"return" = 30,
     vararg = 37,
@@ -35,6 +36,7 @@ pub const OpCode = packed enum(u6) {
             .loadbool => Instruction.LoadBool,
             .loadnil => Instruction.LoadNil,
             .getglobal => Instruction.GetGlobal,
+            .gettable => Instruction.GetTable,
             .call => Instruction.Call,
             .@"return" => Instruction.Return,
             .vararg => Instruction.VarArg,
@@ -127,7 +129,7 @@ pub const max_constant_index: u9 = bit_mask_constant - 1;
 
 /// ISK macro equivalent (lopcodes.h)
 pub fn isConstant(val: u9) bool {
-    return val & bit_mask_constant == 1;
+    return val & bit_mask_constant != 0;
 }
 
 /// INDEXK macro equivalent (lopcodes.h)
@@ -280,6 +282,17 @@ pub const Instruction = packed struct {
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .ConstantOrRegisterConstant,
             .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
+    };
+
+    pub const GetTable = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .RegisterOrJumpOffset,
+            .c_mode = .ConstantOrRegisterConstant,
             .test_a_mode = true,
             .test_t_mode = false,
         };

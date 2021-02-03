@@ -131,7 +131,10 @@ pub const Compiler = struct {
                     e.desc = .{ .relocable = .{ .instruction_index = index } };
                 },
                 .indexed => {
-                    @panic("TODO");
+                    self.freereg(e.desc.indexed.key_register_or_constant_index);
+                    self.freereg(e.desc.indexed.table_register);
+                    const instruction_index = try self.emitABC(.gettable, 0, e.desc.indexed.table_register, e.desc.indexed.key_register_or_constant_index);
+                    e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
                 },
                 .vararg, .call => {
                     try self.setoneret(e);
@@ -159,7 +162,7 @@ pub const Compiler = struct {
             }
         }
 
-        pub fn freereg(self: *Func, reg: u8) void {
+        pub fn freereg(self: *Func, reg: u9) void {
             if (!zua.opcodes.isConstant(reg) and reg >= self.num_active_local_vars) {
                 self.free_register -= 1;
                 std.debug.assert(reg == self.free_register);
@@ -374,6 +377,43 @@ pub const Compiler = struct {
             return null;
         }
 
+        pub fn exp2val(self: *Func, e: *ExpDesc) !void {
+            if (e.hasjumps()) {
+                _ = try self.exp2anyreg(e);
+            } else {
+                try self.dischargevars(e);
+            }
+        }
+
+        pub fn exp2RK(self: *Func, e: *ExpDesc) !u9 {
+            try self.exp2val(e);
+            switch (e.desc) {
+                .number, .@"true", .@"false", .nil => {
+                    @panic("TODO");
+                },
+                .constant_index => {
+                    if (e.desc.constant_index <= zua.opcodes.max_constant_index) {
+                        return zua.opcodes.constantIndexToRK(@intCast(u9, e.desc.constant_index));
+                    }
+                },
+                else => {},
+            }
+            // not a constant in the right range, put it in a register
+            return @intCast(u9, try self.exp2anyreg(e));
+        }
+
+        pub fn indexed(self: *Func, table: *ExpDesc, key: *ExpDesc) !void {
+            const key_register_or_constant_index = try self.exp2RK(key);
+            // TODO can this be some other type here?
+            const table_register = table.desc.nonreloc.result_register;
+            table.desc = .{
+                .indexed = .{
+                    .table_register = table_register,
+                    .key_register_or_constant_index = key_register_or_constant_index,
+                },
+            };
+        }
+
         /// Current instruction pointer
         pub fn pc(self: *Func) usize {
             return self.code.items.len;
@@ -485,6 +525,7 @@ pub const Compiler = struct {
             .literal => try self.genLiteral(@fieldParentPtr(Node.Literal, "base", node)),
             .identifier => try self.genIdentifier(@fieldParentPtr(Node.Identifier, "base", node)),
             .return_statement => try self.genReturnStatement(@fieldParentPtr(Node.ReturnStatement, "base", node)),
+            .field_access => try self.genFieldAccess(@fieldParentPtr(Node.FieldAccess, "base", node)),
             else => unreachable, // TODO
         }
     }
@@ -605,6 +646,20 @@ pub const Compiler = struct {
         }
     }
 
+    pub fn genFieldAccess(self: *Compiler, node: *Node.FieldAccess) Error!void {
+        if (node.separator.isChar(':')) {
+            @panic("TODO self call");
+        } else {
+            try self.genNode(node.prefix);
+
+            const name = self.source[node.field.start..node.field.end];
+            const constant_index = try self.putConstant(Constant{ .string = name });
+            var key = ExpDesc{ .desc = .{ .constant_index = constant_index } };
+            _ = try self.func.exp2anyreg(&self.func.cur_exp);
+            try self.func.indexed(&self.func.cur_exp, &key);
+        }
+    }
+
     pub fn putConstant(self: *Compiler, constant: Constant) Error!usize {
         var final_constant = constant;
         if (constant == .string and !self.func.constants_map.contains(constant)) {
@@ -715,4 +770,13 @@ test "assignment from function return values" {
 test "vararg" {
     try testCompile("local a = ...");
     try testCompile("local a, b, c = ...");
+    try testCompile(
+        \\local a, b, c = ...
+        \\print(a, b, c)
+    );
+}
+
+test "gettable" {
+    try testCompile("a.b()");
+    try testCompile("a.b(c.d)");
 }

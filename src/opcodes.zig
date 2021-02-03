@@ -26,6 +26,7 @@ pub const OpCode = packed enum(u6) {
     getglobal = 5,
     call = 28,
     @"return" = 30,
+    vararg = 37,
 
     pub fn InstructionType(op: OpCode) type {
         return switch (op) {
@@ -36,6 +37,7 @@ pub const OpCode = packed enum(u6) {
             .getglobal => Instruction.GetGlobal,
             .call => Instruction.Call,
             .@"return" => Instruction.Return,
+            .vararg => Instruction.VarArg,
         };
     }
 
@@ -345,12 +347,76 @@ pub const Instruction = packed struct {
             };
         }
 
+        pub fn getFirstReturnValueRegister(self: *const Return) u8 {
+            return self.instruction.a;
+        }
+
+        pub fn setFirstReturnValueRegister(self: *Return, first_return_value_register: u8) void {
+            self.instruction.a = first_return_value_register;
+        }
+
+        pub fn setNumReturnValues(self: *Return, num_return_values: ?u9) void {
+            if (num_return_values) |v| {
+                self.instruction.b = v + 1;
+            } else {
+                self.instruction.b = 0;
+            }
+        }
+
         pub fn getNumReturnValues(self: *const Return) ?u9 {
             if (self.isMultipleReturns()) return null;
             return self.instruction.b - 1;
         }
 
         pub fn isMultipleReturns(self: *const Return) bool {
+            return self.instruction.b == 0;
+        }
+    };
+
+    pub const VarArg = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .Used,
+            .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
+
+        pub fn init(first_return_value_register: u8, num_return_values: ?u9) VarArg {
+            const b_val = if (num_return_values != null) num_return_values.? + 1 else 0;
+            return .{
+                .instruction = Instruction.ABC.init(
+                    .vararg,
+                    first_return_value_register,
+                    b_val,
+                    0,
+                ),
+            };
+        }
+
+        pub fn getFirstReturnValueRegister(self: *const VarArg) u8 {
+            return self.instruction.a;
+        }
+
+        pub fn setFirstReturnValueRegister(self: *VarArg, first_return_value_register: u8) void {
+            self.instruction.a = first_return_value_register;
+        }
+
+        pub fn setNumReturnValues(self: *VarArg, num_return_values: ?u9) void {
+            if (num_return_values) |v| {
+                self.instruction.b = v + 1;
+            } else {
+                self.instruction.b = 0;
+            }
+        }
+
+        pub fn getNumReturnValues(self: *const VarArg) ?u9 {
+            if (self.isMultipleReturns()) return null;
+            return self.instruction.b - 1;
+        }
+
+        pub fn isMultipleReturns(self: *const VarArg) bool {
             return self.instruction.b == 0;
         }
     };

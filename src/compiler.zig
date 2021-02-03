@@ -148,7 +148,8 @@ pub const Compiler = struct {
                 const instruction = self.getcode(e);
                 const instructionABC = @ptrCast(*Instruction.ABC, instruction);
                 instructionABC.*.b = 2;
-                e.desc = .{ .relocable = .{ .instruction_index = e.desc.vararg.instruction_index } };
+                const instruction_index = e.desc.vararg.instruction_index;
+                e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
             }
         }
 
@@ -326,7 +327,10 @@ pub const Compiler = struct {
                 const instruction = @ptrCast(*Instruction.Call, self.getcode(e));
                 instruction.setNumReturnValues(num_results);
             } else if (e.desc == .vararg) {
-                @panic("TODO");
+                const instruction = @ptrCast(*Instruction.VarArg, self.getcode(e));
+                instruction.setNumReturnValues(num_results);
+                instruction.setFirstReturnValueRegister(self.free_register);
+                try self.reserveregs(1);
             }
         }
 
@@ -581,6 +585,10 @@ pub const Compiler = struct {
             .keyword_nil => {
                 self.func.cur_exp.desc = .{ .nil = {} };
             },
+            .ellipsis => {
+                const instruction_index = try self.func.emitInstruction(Instruction.VarArg.init(0, 0));
+                self.func.cur_exp = .{ .desc = .{ .vararg = .{ .instruction_index = instruction_index } } };
+            },
             else => unreachable,
         }
     }
@@ -702,4 +710,9 @@ test "assignment from function return values" {
     );
     try testCompile("local a, b = f()");
     try testCompile("local a, b = f(), g()");
+}
+
+test "vararg" {
+    try testCompile("local a = ...");
+    try testCompile("local a, b, c = ...");
 }

@@ -1712,6 +1712,14 @@ test "assignment" {
         \\  literal nil
         \\
     );
+    try testParse("a = ...",
+        \\chunk
+        \\ assignment_statement
+        \\  identifier
+        \\ =
+        \\  literal ...
+        \\
+    );
 }
 
 test "assignment errors" {

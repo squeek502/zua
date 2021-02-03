@@ -153,7 +153,14 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
             },
             //.setlist => {},
             //.closure => {},
-            //.vararg => {},
+            .vararg => {
+                const vararg_inst = @bitCast(Instruction.VarArg, instruction);
+                const num_returns = vararg_inst.getNumReturnValues();
+                if (num_returns == null) {
+                    try checkopenop_next(function, i);
+                }
+                try checkreg(function, a + num_returns.? - 1);
+            },
             else => {},
         }
     }

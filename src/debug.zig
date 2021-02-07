@@ -120,7 +120,7 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 }
             },
             //.getupval, .setupval => {},
-            .getglobal => {
+            .getglobal, .setglobal => {
                 const constant = function.constants[@intCast(usize, b)];
                 if (constant != .string) return error.ExpectedStringForGetOrSetGlobal;
             },

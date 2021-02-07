@@ -437,6 +437,27 @@ pub const Compiler = struct {
             e.desc = .{ .nonreloc = .{ .result_register = func_reg } };
         }
 
+        pub fn storevar(self: *Func, var_e: *ExpDesc, e: *ExpDesc) !void {
+            switch (var_e.desc) {
+                .local_register => {
+                    @panic("TODO");
+                },
+                .upvalue_index => {
+                    @panic("TODO");
+                },
+                .global => {
+                    const reg = try self.exp2anyreg(e);
+                    const name_constant_index = var_e.desc.global.name_constant_index;
+                    _ = try self.emitABx(.setglobal, reg, @intCast(u18, name_constant_index));
+                },
+                .indexed => {
+                    @panic("TODO");
+                },
+                else => unreachable,
+            }
+            try self.freeexp(e);
+        }
+
         /// Current instruction pointer
         pub fn pc(self: *Func) usize {
             return self.code.items.len;
@@ -562,13 +583,8 @@ pub const Compiler = struct {
                 const name_token = identifier_node.token;
                 try self.func.new_localvar(name_token, i);
             }
-            for (assignment_statement.values) |value_node, i| {
-                try self.genNode(value_node);
-                // skip the last one
-                if (i != assignment_statement.values.len - 1) {
-                    try self.func.exp2nextreg(&self.func.cur_exp);
-                }
-            }
+            try self.genExpList1(assignment_statement.values);
+
             if (assignment_statement.values.len == 0) {
                 self.func.cur_exp = .{
                     .desc = .{ .@"void" = {} },
@@ -576,6 +592,53 @@ pub const Compiler = struct {
             }
             try self.func.adjust_assign(assignment_statement.variables.len, assignment_statement.values.len, &self.func.cur_exp);
             try self.func.adjustlocalvars(assignment_statement.variables.len);
+        } else {
+            // TODO check_conflict
+            // TODO checklimit 'variables in assignment'
+            const var_exps = try self.arena.alloc(ExpDesc, assignment_statement.variables.len);
+            defer self.arena.free(var_exps);
+
+            for (assignment_statement.variables) |variable_node, i| {
+                try self.genNode(variable_node);
+                // store the ExpDesc's for use later
+                var_exps[i] = self.func.cur_exp;
+            }
+            try self.genExpList1(assignment_statement.values);
+
+            var last_taken_care_of = false;
+            if (assignment_statement.values.len != assignment_statement.variables.len) {
+                try self.func.adjust_assign(assignment_statement.variables.len, assignment_statement.values.len, &self.func.cur_exp);
+                if (assignment_statement.values.len > assignment_statement.variables.len) {
+                    // remove extra values
+                    self.func.free_register -= @intCast(u8, assignment_statement.values.len - assignment_statement.variables.len);
+                }
+            } else {
+                try self.func.setoneret(&self.func.cur_exp);
+                try self.func.storevar(&var_exps[var_exps.len - 1], &self.func.cur_exp);
+                last_taken_care_of = true;
+            }
+
+            // traverse in reverse order to maintain compatibility with
+            // PUC Lua bytecode order
+            var unstored_index: usize = assignment_statement.variables.len - 1;
+            if (last_taken_care_of and unstored_index > 0) unstored_index -= 1;
+            const finished: bool = unstored_index == 0 and last_taken_care_of;
+            while (!finished) : (unstored_index -= 1) {
+                self.func.cur_exp = .{ .desc = .{ .nonreloc = .{ .result_register = self.func.free_register - 1 } } };
+                try self.func.storevar(&var_exps[unstored_index], &self.func.cur_exp);
+                if (unstored_index == 0) break;
+            }
+        }
+    }
+
+    /// helper function equivalent to explist1 in lparser.c
+    fn genExpList1(self: *Compiler, nodes: []*Node) Error!void {
+        for (nodes) |node, i| {
+            try self.genNode(node);
+            // skip the last one
+            if (i != nodes.len - 1) {
+                try self.func.exp2nextreg(&self.func.cur_exp);
+            }
         }
     }
 
@@ -775,7 +838,7 @@ fn testCompile(source: []const u8) !void {
     const luacDump = try getLuacDump(std.testing.allocator, source);
     defer std.testing.allocator.free(luacDump);
 
-    //std.debug.print("\n\n", .{});
+    //std.debug.print("\n", .{});
     //chunk.printCode();
 
     std.testing.expectEqualSlices(u8, luacDump, buf.items);
@@ -836,4 +899,11 @@ test "gettable" {
 test "self" {
     try testCompile("a:b()");
     try testCompile("a:b(1,2,3)");
+}
+
+test "setglobal" {
+    try testCompile("a = 1");
+    try testCompile("a, b, c = 1, 2, 3");
+    try testCompile("a = 1, 2, 3");
+    try testCompile("a, b, c = 1");
 }

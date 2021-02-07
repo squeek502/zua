@@ -132,7 +132,7 @@ pub const Function = struct {
             var sbx: i32 = @bitCast(Instruction.AsBx, instruction).getSignedBx();
             std.debug.print("\t{d}\t", .{i + 1});
             std.debug.print("[-]\t", .{}); // TODO line number
-            std.debug.print("{}\t", .{op});
+            std.debug.print("{s: <9}\t", .{@tagName(op)});
             switch (op.getOpMode()) {
                 .iABC => {
                     std.debug.print("{d}", .{a});

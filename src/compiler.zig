@@ -571,7 +571,18 @@ pub const Compiler = struct {
             .return_statement => try self.genReturnStatement(@fieldParentPtr(Node.ReturnStatement, "base", node)),
             .field_access => try self.genFieldAccess(@fieldParentPtr(Node.FieldAccess, "base", node)),
             .index_access => try self.genIndexAccess(@fieldParentPtr(Node.IndexAccess, "base", node)),
+            .table_constructor => try self.genTableConstructor(@fieldParentPtr(Node.TableConstructor, "base", node)),
             else => unreachable, // TODO
+        }
+    }
+
+    pub fn genTableConstructor(self: *Compiler, table_constructor: *Node.TableConstructor) Error!void {
+        const instruction_index = try self.func.emitABC(.newtable, 0, 0, 0);
+        self.func.cur_exp = .{ .desc = .{ .relocable = .{ .instruction_index = instruction_index } } };
+        try self.func.exp2nextreg(&self.func.cur_exp);
+
+        if (table_constructor.fields.len > 0) {
+            @panic("TODO constructor fields");
         }
     }
 
@@ -906,4 +917,8 @@ test "setglobal" {
     try testCompile("a, b, c = 1, 2, 3");
     try testCompile("a = 1, 2, 3");
     try testCompile("a, b, c = 1");
+}
+
+test "newtable" {
+    try testCompile("return {}");
 }

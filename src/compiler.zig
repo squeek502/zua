@@ -572,6 +572,7 @@ pub const Compiler = struct {
             .field_access => try self.genFieldAccess(@fieldParentPtr(Node.FieldAccess, "base", node)),
             .index_access => try self.genIndexAccess(@fieldParentPtr(Node.IndexAccess, "base", node)),
             .table_constructor => try self.genTableConstructor(@fieldParentPtr(Node.TableConstructor, "base", node)),
+            .table_field => unreachable, // should never be called outside of genTableConstructor
             else => unreachable, // TODO
         }
     }
@@ -581,8 +582,40 @@ pub const Compiler = struct {
         self.func.cur_exp = .{ .desc = .{ .relocable = .{ .instruction_index = instruction_index } } };
         try self.func.exp2nextreg(&self.func.cur_exp);
 
+        var num_array_values: u9 = 0;
+        for (table_constructor.fields) |field_node_base| {
+            const field_node = @fieldParentPtr(Node.TableField, "base", field_node_base);
+            try self.genTableField(field_node);
+            if (field_node.key == null) {
+                num_array_values += 1;
+            }
+        }
+
         if (table_constructor.fields.len > 0) {
-            @panic("TODO constructor fields");
+            const newtable_instruction = @ptrCast(*Instruction.NewTable, &self.func.code.items[instruction_index]);
+            newtable_instruction.setArraySize(num_array_values);
+            newtable_instruction.setTableSize(@intCast(u9, table_constructor.fields.len) - num_array_values);
+        }
+    }
+
+    pub fn genTableField(self: *Compiler, table_field: *Node.TableField) Error!void {
+        if (table_field.key == null) {
+            @panic("TODO listfield");
+        } else {
+            const prev_exp = self.func.cur_exp;
+            const prev_free_reg = self.func.free_register;
+
+            try self.genNode(table_field.key.?);
+            const key_rk = try self.func.exp2RK(&self.func.cur_exp);
+
+            try self.genNode(table_field.value);
+            const val_rk = try self.func.exp2RK(&self.func.cur_exp);
+
+            const table_reg = prev_exp.desc.nonreloc.result_register;
+            _ = try self.func.emitInstruction(Instruction.SetTable.init(table_reg, key_rk, val_rk));
+
+            self.func.free_register = prev_free_reg;
+            self.func.cur_exp = prev_exp;
         }
     }
 
@@ -731,6 +764,11 @@ pub const Compiler = struct {
             .ellipsis => {
                 const instruction_index = try self.func.emitInstruction(Instruction.VarArg.init(0, 0));
                 self.func.cur_exp = .{ .desc = .{ .vararg = .{ .instruction_index = instruction_index } } };
+            },
+            .name => {
+                const name = self.source[literal.token.start..literal.token.end];
+                const constant_index = try self.putConstant(Constant{ .string = name });
+                self.func.cur_exp = .{ .desc = .{ .constant_index = constant_index } };
             },
             else => unreachable,
         }
@@ -921,4 +959,7 @@ test "setglobal" {
 
 test "newtable" {
     try testCompile("return {}");
+    try testCompile("return {a=1}");
+    try testCompile("return {[a]=1}");
+    try testCompile("return {a=1, b=2, c=3}");
 }

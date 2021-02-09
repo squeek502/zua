@@ -26,6 +26,7 @@ pub const OpCode = packed enum(u6) {
     getglobal = 5,
     gettable = 6,
     setglobal = 7,
+    settable = 9,
     newtable = 10,
     self = 11,
     call = 28,
@@ -41,6 +42,7 @@ pub const OpCode = packed enum(u6) {
             .getglobal => Instruction.GetGlobal,
             .gettable => Instruction.GetTable,
             .setglobal => Instruction.SetGlobal,
+            .settable => Instruction.SetTable,
             .newtable => Instruction.NewTable,
             .self => Instruction.Self,
             .call => Instruction.Call,
@@ -315,6 +317,28 @@ pub const Instruction = packed struct {
         };
     };
 
+    pub const SetTable = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .ConstantOrRegisterConstant,
+            .c_mode = .ConstantOrRegisterConstant,
+            .test_a_mode = false,
+            .test_t_mode = false,
+        };
+
+        pub fn init(table_reg: u8, key_rk: u9, val_rk: u9) SetTable {
+            return .{
+                .instruction = Instruction.ABC.init(
+                    .settable,
+                    table_reg,
+                    key_rk,
+                    val_rk,
+                ),
+            };
+        }
+    };
+
     pub const NewTable = packed struct {
         instruction: Instruction.ABC,
 
@@ -324,6 +348,14 @@ pub const Instruction = packed struct {
             .test_a_mode = true,
             .test_t_mode = false,
         };
+
+        pub fn setArraySize(self: *NewTable, num: u9) void {
+            self.instruction.b = num;
+        }
+
+        pub fn setTableSize(self: *NewTable, num: u9) void {
+            self.instruction.c = num;
+        }
     };
 
     pub const Self = packed struct {

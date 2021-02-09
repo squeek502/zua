@@ -53,7 +53,7 @@ pub fn checkopenop(instruction: Instruction) !void {
         .call,
         //.tailcall,
         .@"return",
-        //.setlist,
+        .setlist,
         => {
             const b = @bitCast(Instruction.ABC, instruction).b;
             if (b != 0) return error.InvalidInstructionAfterOpenCall;
@@ -109,9 +109,9 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 const bool_inst = @bitCast(Instruction.LoadBool, instruction);
                 if (bool_inst.doesJump()) {
                     if (i + 2 >= function.code.len) return error.ImpossibleLoadBoolInstructionPlacement;
-                    //const next_instruction = function.code[i+1];
-                    //const check = next_instruction.op != .setlist or next_instruction.(somehow get arg c) != 0;
-                    //if (!check) return error.ImpossibleInstructionAfterLoadBool;
+                    const next_instruction = function.code[i + 1];
+                    const check = next_instruction.op != .setlist or @bitCast(Instruction.ABC, next_instruction).c != 0;
+                    if (!check) return error.ImpossibleInstructionAfterLoadBool;
                 }
             },
             .loadnil => {
@@ -156,7 +156,15 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                     try checkreg(function, @intCast(usize, a + num_returns.? - 1));
                 }
             },
-            //.setlist => {},
+            .setlist => {
+                const setlist_inst = @bitCast(Instruction.SetList, instruction);
+                if (b > 0) {
+                    try checkreg(function, @intCast(usize, a + b));
+                }
+                if (c == 0) {
+                    @panic("TODO");
+                }
+            },
             //.closure => {},
             .vararg => {
                 const vararg_inst = @bitCast(Instruction.VarArg, instruction);

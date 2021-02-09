@@ -90,11 +90,13 @@ pub const Compiler = struct {
             self.free_register += n;
         }
 
-        pub fn exp2nextreg(self: *Func, e: *ExpDesc) !void {
+        pub fn exp2nextreg(self: *Func, e: *ExpDesc) !u8 {
             try self.dischargevars(e);
             try self.freeexp(e);
             try self.reserveregs(1);
-            try self.exp2reg(e, self.free_register - 1);
+            const reg = self.free_register - 1;
+            try self.exp2reg(e, reg);
+            return reg;
         }
 
         pub fn exp2anyreg(self: *Func, e: *ExpDesc) !u8 {
@@ -109,9 +111,7 @@ pub const Compiler = struct {
                     return reg;
                 }
             }
-
-            try self.exp2nextreg(e);
-            return e.desc.nonreloc.result_register;
+            return try self.exp2nextreg(e);
         }
 
         pub fn dischargevars(self: *Func, e: *ExpDesc) !void {
@@ -315,7 +315,7 @@ pub const Compiler = struct {
                 }
             } else {
                 if (e.desc != .@"void") {
-                    try self.exp2nextreg(e);
+                    _ = try self.exp2nextreg(e);
                 }
                 if (extra > 0) {
                     const reg = self.free_register;
@@ -458,6 +458,18 @@ pub const Compiler = struct {
             try self.freeexp(e);
         }
 
+        pub fn setlist(self: *Func, base: u8, num_values: usize, to_store: ?usize) !void {
+            const flush_batch_num: usize = (num_values - 1) / Instruction.SetList.fields_per_flush + 1;
+            const num_values_in_batch: u9 = if (to_store == null) 0 else @intCast(u9, to_store.?);
+            if (flush_batch_num <= Instruction.ABC.max_c) {
+                _ = try self.emitABC(.setlist, base, num_values_in_batch, @intCast(u9, flush_batch_num));
+            } else {
+                _ = try self.emitABC(.setlist, base, num_values_in_batch, 0);
+                @panic("TODO oversized flush batch num");
+            }
+            self.free_register = base + 1;
+        }
+
         /// Current instruction pointer
         pub fn pc(self: *Func) usize {
             return self.code.items.len;
@@ -580,15 +592,31 @@ pub const Compiler = struct {
     pub fn genTableConstructor(self: *Compiler, table_constructor: *Node.TableConstructor) Error!void {
         const instruction_index = try self.func.emitABC(.newtable, 0, 0, 0);
         self.func.cur_exp = .{ .desc = .{ .relocable = .{ .instruction_index = instruction_index } } };
-        try self.func.exp2nextreg(&self.func.cur_exp);
+        const table_reg = try self.func.exp2nextreg(&self.func.cur_exp);
 
         var num_array_values: u9 = 0;
+        var unflushed_array_values: u9 = 0;
         for (table_constructor.fields) |field_node_base| {
+            const prev_exp = self.func.cur_exp;
+
             const field_node = @fieldParentPtr(Node.TableField, "base", field_node_base);
             try self.genTableField(field_node);
             if (field_node.key == null) {
                 num_array_values += 1;
+                unflushed_array_values += 1;
             }
+
+            if (unflushed_array_values >= Instruction.SetList.fields_per_flush) {
+                try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
+                unflushed_array_values = 0;
+            }
+
+            self.func.cur_exp = prev_exp;
+        }
+
+        if (unflushed_array_values > 0) {
+            // TODO MULTRET
+            try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
         }
 
         if (table_constructor.fields.len > 0) {
@@ -600,9 +628,10 @@ pub const Compiler = struct {
 
     pub fn genTableField(self: *Compiler, table_field: *Node.TableField) Error!void {
         if (table_field.key == null) {
-            @panic("TODO listfield");
+            try self.genNode(table_field.value);
+            _ = try self.func.exp2nextreg(&self.func.cur_exp);
         } else {
-            const prev_exp = self.func.cur_exp;
+            const table_reg = self.func.cur_exp.desc.nonreloc.result_register;
             const prev_free_reg = self.func.free_register;
 
             try self.genNode(table_field.key.?);
@@ -611,11 +640,9 @@ pub const Compiler = struct {
             try self.genNode(table_field.value);
             const val_rk = try self.func.exp2RK(&self.func.cur_exp);
 
-            const table_reg = prev_exp.desc.nonreloc.result_register;
             _ = try self.func.emitInstruction(Instruction.SetTable.init(table_reg, key_rk, val_rk));
 
             self.func.free_register = prev_free_reg;
-            self.func.cur_exp = prev_exp;
         }
     }
 
@@ -681,7 +708,7 @@ pub const Compiler = struct {
             try self.genNode(node);
             // skip the last one
             if (i != nodes.len - 1) {
-                try self.func.exp2nextreg(&self.func.cur_exp);
+                _ = try self.func.exp2nextreg(&self.func.cur_exp);
             }
         }
     }
@@ -698,7 +725,7 @@ pub const Compiler = struct {
             if (return_statement.values.len == 1) {
                 first_return_reg = try self.func.exp2anyreg(&self.func.cur_exp);
             } else {
-                try self.func.exp2nextreg(&self.func.cur_exp);
+                _ = try self.func.exp2nextreg(&self.func.cur_exp);
             }
         }
         if (return_statement.values.len > 1) {
@@ -716,7 +743,7 @@ pub const Compiler = struct {
             is_self_call = field_access_node.separator.isChar(':');
         }
         if (!is_self_call) {
-            try self.func.exp2nextreg(&self.func.cur_exp);
+            _ = try self.func.exp2nextreg(&self.func.cur_exp);
         }
         const func_exp = self.func.cur_exp;
         std.debug.assert(func_exp.desc == .nonreloc);
@@ -724,7 +751,7 @@ pub const Compiler = struct {
 
         for (call.arguments) |argument_node| {
             try self.genNode(argument_node);
-            try self.func.exp2nextreg(&self.func.cur_exp);
+            _ = try self.func.exp2nextreg(&self.func.cur_exp);
         }
         var nparams = self.func.free_register - (base + 1);
 
@@ -962,4 +989,14 @@ test "newtable" {
     try testCompile("return {a=1}");
     try testCompile("return {[a]=1}");
     try testCompile("return {a=1, b=2, c=3}");
+    try testCompile("return {1}");
+    try testCompile("return {1,2,3}");
+    try testCompile("return {1, a=2, 3}");
+    try testCompile("return {1, 2, a=b, 3}");
+    try testCompile("return {a=f()}");
+    try testCompile("return {" ++ ("a," ** 51) ++ "}");
+
+    // TODO known broken cases
+    //try testCompile("return {...}");
+    //try testCompile("return {f()}");
 }

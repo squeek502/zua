@@ -131,7 +131,6 @@ pub const Function = struct {
             var bx: i32 = @bitCast(Instruction.ABx, instruction).bx;
             var sbx: i32 = @bitCast(Instruction.AsBx, instruction).getSignedBx();
             std.debug.print("\t{d}\t", .{i + 1});
-            std.debug.print("[-]\t", .{}); // TODO line number
             std.debug.print("{s: <9}\t", .{@tagName(op)});
             switch (op.getOpMode()) {
                 .iABC => {
@@ -297,4 +296,54 @@ test "getChunkId" {
 
     var min_buf: [14]u8 = undefined;
     std.testing.expectEqualStrings("[string \"...\"]", getChunkId("anything", &min_buf));
+}
+
+pub const max_floating_point_byte = 0b1111 << (0b11111 - 1);
+pub const FloatingPointByteIntType = std.math.IntFittingRange(0, max_floating_point_byte);
+
+/// Converts an integer to a "floating point byte", represented as
+/// (eeeeexxx), where the real value is (1xxx) * 2^(eeeee - 1) if
+/// eeeee != 0 and (xxx) otherwise.
+/// This conversion is lossy.
+/// Equivalent to luaO_int2fb in lobject.c
+pub fn intToFloatingPointByte(_x: FloatingPointByteIntType) u8 {
+    std.debug.assert(_x <= max_floating_point_byte);
+    var x = _x;
+    var e: u8 = 0;
+    while (x >= 16) {
+        x = (x + 1) >> 1;
+        e += 1;
+    }
+    if (x < 8) {
+        return @intCast(u8, x);
+    } else {
+        return @intCast(u8, ((e + 1) << 3) | (x - 8));
+    }
+}
+
+/// Equivalent to luaO_fb2int in lobject.c
+pub fn floatingPointByteToInt(_x: u8) FloatingPointByteIntType {
+    var x: FloatingPointByteIntType = _x;
+    var e: u5 = @intCast(u5, x >> 3);
+    if (e == 0) {
+        return x;
+    } else {
+        return ((x & 7) + 8) << (e - 1);
+    }
+}
+
+test "intToFloatingPointByte" {
+    std.testing.expectEqual(@as(u8, 0), intToFloatingPointByte(0));
+    std.testing.expectEqual(@as(u8, 8), intToFloatingPointByte(8));
+    std.testing.expectEqual(@as(u8, 9), intToFloatingPointByte(9));
+    std.testing.expectEqual(@as(u8, 29), intToFloatingPointByte(51));
+    std.testing.expectEqual(@as(u8, 64), intToFloatingPointByte(1000));
+    std.testing.expectEqual(@as(u8, 64), intToFloatingPointByte(1001));
+    std.testing.expectEqual(@as(u8, 65), intToFloatingPointByte(1025));
+    std.testing.expectEqual(@as(u8, 255), intToFloatingPointByte(max_floating_point_byte));
+
+    std.testing.expectEqual(@as(FloatingPointByteIntType, 52), floatingPointByteToInt(29));
+    std.testing.expectEqual(@as(FloatingPointByteIntType, 1024), floatingPointByteToInt(64));
+    std.testing.expectEqual(@as(FloatingPointByteIntType, 1152), floatingPointByteToInt(65));
+    std.testing.expectEqual(@as(FloatingPointByteIntType, max_floating_point_byte), floatingPointByteToInt(255));
 }

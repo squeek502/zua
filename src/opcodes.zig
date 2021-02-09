@@ -1,4 +1,5 @@
 const std = @import("std");
+const zua = @import("zua.zig");
 
 // From lopcodes.h:
 //
@@ -31,6 +32,7 @@ pub const OpCode = packed enum(u6) {
     self = 11,
     call = 28,
     @"return" = 30,
+    setlist = 34,
     vararg = 37,
 
     pub fn InstructionType(op: OpCode) type {
@@ -47,6 +49,7 @@ pub const OpCode = packed enum(u6) {
             .self => Instruction.Self,
             .call => Instruction.Call,
             .@"return" => Instruction.Return,
+            .setlist => Instruction.SetList,
             .vararg => Instruction.VarArg,
         };
     }
@@ -170,6 +173,10 @@ pub const Instruction = packed struct {
                 .c = c,
             };
         }
+
+        pub const max_a = std.math.maxInt(u8);
+        pub const max_b = std.math.maxInt(u9);
+        pub const max_c = std.math.maxInt(u9);
     };
 
     pub const ABx = packed struct {
@@ -184,6 +191,8 @@ pub const Instruction = packed struct {
                 .bx = bx,
             };
         }
+
+        pub const max_bx = std.math.maxInt(u18);
     };
 
     pub const AsBx = packed struct {
@@ -209,18 +218,17 @@ pub const Instruction = packed struct {
             self._bx = signedBxToUnsigned(val);
         }
 
-        const max_bx = std.math.maxInt(u18);
-        const max_sbx = std.math.maxInt(i18);
+        pub const max_sbx = std.math.maxInt(i18);
         // Not std.math.minInt because of the subtraction stuff
-        const min_sbx = -max_sbx;
+        pub const min_sbx = -max_sbx;
 
         pub fn unsignedBxToSigned(Bx: u18) i18 {
-            comptime const fitting_int = std.math.IntFittingRange(min_sbx, max_bx);
+            comptime const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
             return @intCast(i18, @intCast(fitting_int, Bx) - max_sbx);
         }
 
         pub fn signedBxToUnsigned(sBx: i18) u18 {
-            comptime const fitting_int = std.math.IntFittingRange(min_sbx, max_bx);
+            comptime const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
             return @intCast(u18, @intCast(fitting_int, sBx) + max_sbx);
         }
     };
@@ -350,11 +358,11 @@ pub const Instruction = packed struct {
         };
 
         pub fn setArraySize(self: *NewTable, num: u9) void {
-            self.instruction.b = num;
+            self.instruction.b = @intCast(u9, zua.object.intToFloatingPointByte(num));
         }
 
         pub fn setTableSize(self: *NewTable, num: u9) void {
-            self.instruction.c = num;
+            self.instruction.c = @intCast(u9, zua.object.intToFloatingPointByte(num));
         }
     };
 
@@ -455,6 +463,20 @@ pub const Instruction = packed struct {
         pub fn isMultipleReturns(self: *const Return) bool {
             return self.instruction.b == 0;
         }
+    };
+
+    pub const SetList = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .Used,
+            .c_mode = .Used,
+            .test_a_mode = false,
+            .test_t_mode = false,
+        };
+
+        /// equivalent to LFIELDS_PER_FLUSH from lopcodes.h
+        pub const fields_per_flush = 50;
     };
 
     pub const VarArg = packed struct {

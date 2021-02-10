@@ -357,11 +357,11 @@ pub const Instruction = packed struct {
             .test_t_mode = false,
         };
 
-        pub fn setArraySize(self: *NewTable, num: u9) void {
+        pub fn setArraySize(self: *NewTable, num: zua.object.FloatingPointByteIntType) void {
             self.instruction.b = @intCast(u9, zua.object.intToFloatingPointByte(num));
         }
 
-        pub fn setTableSize(self: *NewTable, num: u9) void {
+        pub fn setTableSize(self: *NewTable, num: zua.object.FloatingPointByteIntType) void {
             self.instruction.c = @intCast(u9, zua.object.intToFloatingPointByte(num));
         }
     };

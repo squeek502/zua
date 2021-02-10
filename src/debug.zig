@@ -66,7 +66,12 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
     try precheck(function);
     // defaults to final return (a 'neutral' instruction)
     var last_instruction_that_changed_reg: usize = function.code.len - 1;
+    var instructions_to_skip: usize = 0;
     for (function.code) |instruction, i| {
+        if (instructions_to_skip > 0) {
+            instructions_to_skip -= 1;
+            continue;
+        }
         const a = instruction.a;
         var b: i32 = 0;
         var c: u9 = 0;
@@ -162,7 +167,10 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                     try checkreg(function, @intCast(usize, a + b));
                 }
                 if (c == 0) {
-                    @panic("TODO");
+                    // if C is zero, then the next instruction is just a u32 containing
+                    // the batch number
+                    if (i + 1 >= function.code.len) return error.ExpectedSetListBatchNumberInstruction;
+                    instructions_to_skip += 1;
                 }
             },
             //.closure => {},
@@ -171,8 +179,11 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 const num_returns = vararg_inst.getNumReturnValues();
                 if (num_returns == null) {
                     try checkopenop_next(function, i);
+                    // TODO how does lua avoid overflow here?
+                    //try checkreg(function, a + num_returns.? - 1);
+                } else {
+                    try checkreg(function, a + num_returns.? - 1);
                 }
-                try checkreg(function, a + num_returns.? - 1);
             },
             else => {},
         }

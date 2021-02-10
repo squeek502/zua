@@ -325,7 +325,7 @@ pub const Compiler = struct {
             }
         }
 
-        pub fn setreturns(self: *Func, e: *ExpDesc, num_results: u9) !void {
+        pub fn setreturns(self: *Func, e: *ExpDesc, num_results: ?u9) !void {
             if (e.desc == .call) {
                 const instruction = @ptrCast(*Instruction.Call, self.getcode(e));
                 instruction.setNumReturnValues(num_results);
@@ -335,6 +335,10 @@ pub const Compiler = struct {
                 instruction.setFirstReturnValueRegister(self.free_register);
                 try self.reserveregs(1);
             }
+        }
+
+        pub fn setmultret(self: *Func, e: *ExpDesc) !void {
+            return self.setreturns(e, null);
         }
 
         pub fn adjustlocalvars(self: *Func, num_vars: usize) !void {
@@ -465,7 +469,10 @@ pub const Compiler = struct {
                 _ = try self.emitABC(.setlist, base, num_values_in_batch, @intCast(u9, flush_batch_num));
             } else {
                 _ = try self.emitABC(.setlist, base, num_values_in_batch, 0);
-                @panic("TODO oversized flush batch num");
+                // if the batch number can't fit in the C field, then
+                // we use an entire 'instruction' to represent it, but the instruction
+                // is just the value itself (no opcode, etc)
+                _ = try self.emitInstruction(@intCast(u32, flush_batch_num));
             }
             self.free_register = base + 1;
         }
@@ -594,42 +601,64 @@ pub const Compiler = struct {
         self.func.cur_exp = .{ .desc = .{ .relocable = .{ .instruction_index = instruction_index } } };
         const table_reg = try self.func.exp2nextreg(&self.func.cur_exp);
 
-        var num_array_values: u9 = 0;
-        var unflushed_array_values: u9 = 0;
+        var num_keyed_values: zua.object.FloatingPointByteIntType = 0;
+        var num_array_values: zua.object.FloatingPointByteIntType = 0;
+        var unflushed_array_values: u8 = 0;
+        var array_value_exp: ExpDesc = .{ .desc = .{ .@"void" = {} } };
         for (table_constructor.fields) |field_node_base| {
             const prev_exp = self.func.cur_exp;
+
+            // this is here so that the last array value does not get exp2nextreg called
+            // on it, because we need to handle it differently if it has an unknown number
+            // of returns
+            if (array_value_exp.desc != .@"void") {
+                _ = try self.func.exp2nextreg(&array_value_exp);
+                array_value_exp = .{ .desc = .{ .@"void" = {} } };
+
+                if (unflushed_array_values >= Instruction.SetList.fields_per_flush) {
+                    try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
+                    unflushed_array_values = 0;
+                }
+            }
 
             const field_node = @fieldParentPtr(Node.TableField, "base", field_node_base);
             try self.genTableField(field_node);
             if (field_node.key == null) {
                 num_array_values += 1;
                 unflushed_array_values += 1;
-            }
-
-            if (unflushed_array_values >= Instruction.SetList.fields_per_flush) {
-                try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
-                unflushed_array_values = 0;
+                array_value_exp = self.func.cur_exp;
+            } else {
+                num_keyed_values += 1;
             }
 
             self.func.cur_exp = prev_exp;
         }
 
         if (unflushed_array_values > 0) {
-            // TODO MULTRET
-            try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
+            if (array_value_exp.hasmultret()) {
+                try self.func.setmultret(&array_value_exp);
+                try self.func.setlist(table_reg, num_array_values, null);
+                // don't count this when pre-allocating the table, since
+                // we don't know how many elements will actually be added
+                num_array_values -= 1;
+            } else {
+                if (array_value_exp.desc != .@"void") {
+                    _ = try self.func.exp2nextreg(&array_value_exp);
+                }
+                try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
+            }
         }
 
         if (table_constructor.fields.len > 0) {
             const newtable_instruction = @ptrCast(*Instruction.NewTable, &self.func.code.items[instruction_index]);
             newtable_instruction.setArraySize(num_array_values);
-            newtable_instruction.setTableSize(@intCast(u9, table_constructor.fields.len) - num_array_values);
+            newtable_instruction.setTableSize(num_keyed_values);
         }
     }
 
     pub fn genTableField(self: *Compiler, table_field: *Node.TableField) Error!void {
         if (table_field.key == null) {
             try self.genNode(table_field.value);
-            _ = try self.func.exp2nextreg(&self.func.cur_exp);
         } else {
             const table_reg = self.func.cur_exp.desc.nonreloc.result_register;
             const prev_free_reg = self.func.free_register;
@@ -914,8 +943,8 @@ fn testCompile(source: []const u8) !void {
     const luacDump = try getLuacDump(std.testing.allocator, source);
     defer std.testing.allocator.free(luacDump);
 
-    //std.debug.print("\n", .{});
-    //chunk.printCode();
+    std.debug.print("\n", .{});
+    chunk.printCode();
 
     std.testing.expectEqualSlices(u8, luacDump, buf.items);
 }
@@ -994,9 +1023,12 @@ test "newtable" {
     try testCompile("return {1, a=2, 3}");
     try testCompile("return {1, 2, a=b, 3}");
     try testCompile("return {a=f()}");
-    try testCompile("return {" ++ ("a," ** 51) ++ "}");
+    try testCompile("return {" ++ ("a," ** (Instruction.SetList.fields_per_flush + 1)) ++ "}");
+    try testCompile("return {...}");
+    try testCompile("return {f()}");
+    try testCompile("return {f(), 1, 2, 3}");
+    try testCompile("return {..., 1, 2, 3}");
 
-    // TODO known broken cases
-    //try testCompile("return {...}");
-    //try testCompile("return {f()}");
+    // massive number of array-like values to overflow the u9 with number of batches
+    try testCompile("return {" ++ ("a," ** (std.math.maxInt(u9) * Instruction.SetList.fields_per_flush + 1)) ++ "}");
 }

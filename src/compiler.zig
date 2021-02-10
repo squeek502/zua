@@ -943,8 +943,8 @@ fn testCompile(source: []const u8) !void {
     const luacDump = try getLuacDump(std.testing.allocator, source);
     defer std.testing.allocator.free(luacDump);
 
-    std.debug.print("\n", .{});
-    chunk.printCode();
+    //std.debug.print("\n", .{});
+    //chunk.printCode();
 
     std.testing.expectEqualSlices(u8, luacDump, buf.items);
 }

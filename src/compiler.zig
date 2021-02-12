@@ -487,7 +487,10 @@ pub const Compiler = struct {
                         }
                         try self.codearith(.unm, e, null);
                     },
-                    '#' => @panic("TODO"),
+                    '#' => {
+                        _ = try self.exp2anyreg(e);
+                        try self.codearith(.len, e, null);
+                    },
                     else => unreachable,
                 },
                 else => unreachable,
@@ -577,7 +580,7 @@ pub const Compiler = struct {
                 },
                 .pow => r = std.math.pow(f64, v1, v2),
                 .unm => r = -v1,
-                //.len => return false,
+                .len => return false,
                 else => unreachable,
             }
             // TODO numisnan
@@ -1191,4 +1194,10 @@ test "unary minus" {
     try testCompile("return -a");
     try testCompile("return -1");
     try testCompile("return -(1+2)");
+}
+
+test "length operator" {
+    try testCompile("return #a");
+    try testCompile("return #(1+2)");
+    try testCompile("return #{}");
 }

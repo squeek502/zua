@@ -38,6 +38,7 @@ pub const OpCode = packed enum(u6) {
     mod = 16,
     pow = 17,
     unm = 18,
+    len = 20,
     call = 28,
     @"return" = 30,
     setlist = 34,
@@ -57,6 +58,7 @@ pub const OpCode = packed enum(u6) {
             .self => Instruction.Self,
             .add, .sub, .mul, .div, .mod, .pow => Instruction.BinaryMath,
             .unm => Instruction.UnaryMinus,
+            .len => Instruction.Length,
             .call => Instruction.Call,
             .@"return" => Instruction.Return,
             .setlist => Instruction.SetList,
@@ -423,6 +425,17 @@ pub const Instruction = packed struct {
     };
 
     pub const UnaryMinus = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .RegisterOrJumpOffset,
+            .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
+    };
+
+    pub const Length = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{

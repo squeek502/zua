@@ -232,7 +232,7 @@ pub const Compiler = struct {
         }
 
         /// luaK_ret equivalent
-        pub fn emitReturn(self: *Func, first_return_reg: u8, num_returns: u9) !usize {
+        pub fn emitReturn(self: *Func, first_return_reg: u8, num_returns: ?u9) !usize {
             return self.emitInstruction(Instruction.Return.init(first_return_reg, num_returns));
         }
 
@@ -856,20 +856,26 @@ pub const Compiler = struct {
 
     pub fn genReturnStatement(self: *Compiler, return_statement: *Node.ReturnStatement) Error!void {
         var first_return_reg: u8 = 0;
-        var num_return_values: u9 = @intCast(u9, return_statement.values.len);
+        var num_return_values: ?u9 = @intCast(u9, return_statement.values.len);
 
-        if (num_return_values > 0) {
+        if (num_return_values.? > 0) {
             try self.genExpList1(return_statement.values);
 
             if (self.func.cur_exp.hasmultret()) {
-                @panic("TODO return hasmultret == true");
+                try self.func.setmultret(&self.func.cur_exp);
+                // tail call?
+                if (self.func.cur_exp.desc == .call and num_return_values.? == 1) {
+                    @panic("TODO tailcall");
+                }
+                first_return_reg = self.func.num_active_local_vars;
+                num_return_values = null;
             } else {
-                if (num_return_values == 1) {
+                if (num_return_values.? == 1) {
                     first_return_reg = try self.func.exp2anyreg(&self.func.cur_exp);
                 } else {
                     _ = try self.func.exp2nextreg(&self.func.cur_exp);
                     first_return_reg = self.func.num_active_local_vars;
-                    std.debug.assert(num_return_values == self.func.free_register - first_return_reg);
+                    std.debug.assert(num_return_values.? == self.func.free_register - first_return_reg);
                 }
             }
         }
@@ -1105,6 +1111,7 @@ test "vararg" {
         \\local a, b, c = ...
         \\print(a, b, c)
     );
+    try testCompile("return ...");
 }
 
 test "gettable" {

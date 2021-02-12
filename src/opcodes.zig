@@ -1,5 +1,6 @@
 const std = @import("std");
 const zua = @import("zua.zig");
+const Token = zua.lex.Token;
 
 // From lopcodes.h:
 //
@@ -30,6 +31,12 @@ pub const OpCode = packed enum(u6) {
     settable = 9,
     newtable = 10,
     self = 11,
+    add = 12,
+    sub = 13,
+    mul = 14,
+    div = 15,
+    mod = 16,
+    pow = 17,
     call = 28,
     @"return" = 30,
     setlist = 34,
@@ -47,6 +54,7 @@ pub const OpCode = packed enum(u6) {
             .settable => Instruction.SetTable,
             .newtable => Instruction.NewTable,
             .self => Instruction.Self,
+            .add, .sub, .mul, .div, .mod, .pow => Instruction.BinaryMath,
             .call => Instruction.Call,
             .@"return" => Instruction.Return,
             .setlist => Instruction.SetList,
@@ -375,6 +383,41 @@ pub const Instruction = packed struct {
             .test_a_mode = true,
             .test_t_mode = false,
         };
+    };
+
+    pub const BinaryMath = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .ConstantOrRegisterConstant,
+            .c_mode = .ConstantOrRegisterConstant,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
+
+        // TODO what is `a`?
+        pub fn init(op: OpCode, a: u8, left_rk: u9, right_rk: u9) BinaryMath {
+            return .{
+                .instruction = Instruction.ABC.init(
+                    op,
+                    a,
+                    left_rk,
+                    right_rk,
+                ),
+            };
+        }
+
+        pub fn tokenToOpCode(token: Token) OpCode {
+            return switch (token.char.?) {
+                '+' => .add,
+                '-' => .sub,
+                '*' => .mul,
+                '/' => .div,
+                '%' => .mod,
+                '^' => .pow,
+                else => unreachable,
+            };
+        }
     };
 
     pub const Call = packed struct {

@@ -477,6 +477,95 @@ pub const Compiler = struct {
             self.free_register = base + 1;
         }
 
+        pub fn infix(self: *Func, bin_op: Token, e: *ExpDesc) !void {
+            switch (bin_op.id) {
+                .keyword_and => @panic("TODO"),
+                .keyword_or => @panic("TODO"),
+                .concat => @panic("TODO"),
+                .single_char => switch (bin_op.char.?) {
+                    '+', '-', '*', '/', '%', '^' => {
+                        if (!e.isnumeral()) {
+                            _ = try self.exp2RK(e);
+                        }
+                        return;
+                    },
+                    else => {},
+                },
+                else => {},
+            }
+            _ = try self.exp2RK(e);
+        }
+
+        pub fn posfix(self: *Func, bin_op: Token, e1: *ExpDesc, e2: *ExpDesc) !void {
+            switch (bin_op.id) {
+                .keyword_and => @panic("TODO"),
+                .keyword_or => @panic("TODO"),
+                .concat => @panic("TODO"),
+                .single_char => switch (bin_op.char.?) {
+                    '+', '-', '*', '/', '%', '^' => try self.codearith(Instruction.BinaryMath.tokenToOpCode(bin_op), e1, e2),
+                    '>' => @panic("TODO"),
+                    '<' => @panic("TODO"),
+                    else => unreachable,
+                },
+                .eq => @panic("TODO"),
+                .ne => @panic("TODO"),
+                .le => @panic("TODO"),
+                .ge => @panic("TODO"),
+                else => unreachable,
+            }
+        }
+
+        pub fn codearith(self: *Func, op: OpCode, e1: *ExpDesc, e2: *ExpDesc) !void {
+            if (try self.constfolding(op, e1, e2)) {
+                return;
+            } else {
+                // TODO when operator is unary minus or len, o2 should be zero
+                const o2 = try self.exp2RK(e2);
+                const o1 = try self.exp2RK(e1);
+                if (o1 > o2) {
+                    try self.freeexp(e1);
+                    try self.freeexp(e2);
+                } else {
+                    try self.freeexp(e2);
+                    try self.freeexp(e1);
+                }
+                const instruction_index = try self.emitInstruction(Instruction.BinaryMath.init(op, 0, o1, o2));
+                e1.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
+            }
+        }
+
+        pub fn constfolding(self: *Func, op: OpCode, e1: *ExpDesc, e2: *ExpDesc) !bool {
+            // can only fold two number literals
+            if (!e1.isnumeral() or !e2.isnumeral()) return false;
+
+            const v1: f64 = e1.desc.number;
+            const v2: f64 = e2.desc.number;
+            var r: f64 = 0;
+
+            switch (op) {
+                .add => r = v1 + v2,
+                .sub => r = v1 - v2,
+                .mul => r = v1 * v2,
+                .div => {
+                    if (v2 == 0) return false; // don't divide by 0
+                    r = v1 / v2;
+                },
+                .mod => {
+                    if (v2 == 0) return false; // don't mod by 0
+                    r = @mod(v1, v2);
+                },
+                .pow => r = std.math.pow(f64, v1, v2),
+                // TODO
+                //.unm
+                //.len
+                else => unreachable,
+            }
+            // TODO numisnan
+
+            e1.desc.number = r;
+            return true;
+        }
+
         /// Current instruction pointer
         pub fn pc(self: *Func) usize {
             return self.code.items.len;
@@ -545,6 +634,10 @@ pub const Compiler = struct {
         pub fn hasmultret(self: *ExpDesc) bool {
             return self.desc == .call or self.desc == .vararg;
         }
+
+        pub fn isnumeral(self: *ExpDesc) bool {
+            return self.desc == .number and self.patch_list == null;
+        }
     };
 
     pub fn genChunk(self: *Compiler, chunk: *Node.Chunk) Error!*Func {
@@ -592,8 +685,27 @@ pub const Compiler = struct {
             .index_access => try self.genIndexAccess(@fieldParentPtr(Node.IndexAccess, "base", node)),
             .table_constructor => try self.genTableConstructor(@fieldParentPtr(Node.TableConstructor, "base", node)),
             .table_field => unreachable, // should never be called outside of genTableConstructor
+            .binary_expression => try self.genBinaryExpression(@fieldParentPtr(Node.BinaryExpression, "base", node)),
+            .grouped_expression => try self.genGroupedExpression(@fieldParentPtr(Node.GroupedExpression, "base", node)),
             else => unreachable, // TODO
         }
+    }
+
+    pub fn genBinaryExpression(self: *Compiler, binary_expression: *Node.BinaryExpression) Error!void {
+        try self.genNode(binary_expression.left);
+        try self.func.infix(binary_expression.operator, &self.func.cur_exp);
+        var left_exp = self.func.cur_exp;
+
+        try self.genNode(binary_expression.right);
+        try self.func.posfix(binary_expression.operator, &left_exp, &self.func.cur_exp);
+
+        // posfix modifies the left_exp for its result, meaning we need to set it as the current
+        // TODO this seems like a kind of dumb way to do this, revisit this
+        self.func.cur_exp = left_exp;
+    }
+
+    pub fn genGroupedExpression(self: *Compiler, grouped_expression: *Node.GroupedExpression) Error!void {
+        return self.genNode(grouped_expression.expression);
     }
 
     pub fn genTableConstructor(self: *Compiler, table_constructor: *Node.TableConstructor) Error!void {
@@ -742,25 +854,26 @@ pub const Compiler = struct {
         }
     }
 
-    // TODO this probably might not cut it for something like
-    // return 1 + 2
     pub fn genReturnStatement(self: *Compiler, return_statement: *Node.ReturnStatement) Error!void {
         var first_return_reg: u8 = 0;
         var num_return_values: u9 = @intCast(u9, return_statement.values.len);
 
-        for (return_statement.values) |value_node| {
-            // TODO hasmultret
-            try self.genNode(value_node);
-            if (return_statement.values.len == 1) {
-                first_return_reg = try self.func.exp2anyreg(&self.func.cur_exp);
+        if (num_return_values > 0) {
+            try self.genExpList1(return_statement.values);
+
+            if (self.func.cur_exp.hasmultret()) {
+                @panic("TODO return hasmultret == true");
             } else {
-                _ = try self.func.exp2nextreg(&self.func.cur_exp);
+                if (num_return_values == 1) {
+                    first_return_reg = try self.func.exp2anyreg(&self.func.cur_exp);
+                } else {
+                    _ = try self.func.exp2nextreg(&self.func.cur_exp);
+                    first_return_reg = self.func.num_active_local_vars;
+                    std.debug.assert(num_return_values == self.func.free_register - first_return_reg);
+                }
             }
         }
-        if (return_statement.values.len > 1) {
-            first_return_reg = self.func.num_active_local_vars;
-            std.debug.assert(num_return_values == self.func.free_register - first_return_reg);
-        }
+
         _ = try self.func.emitReturn(first_return_reg, num_return_values);
     }
 
@@ -1031,4 +1144,12 @@ test "newtable" {
 
     // massive number of array-like values to overflow the u9 with number of batches
     try testCompile("return {" ++ ("a," ** (std.math.maxInt(u9) * Instruction.SetList.fields_per_flush + 1)) ++ "}");
+}
+
+test "binary math operators" {
+    try testCompile("return a + b");
+    try testCompile("return a + b, b + c");
+    try testCompile("return a + b / c * d ^ e % f");
+    // const folding (the compiled version will fold this into a single constant)
+    try testCompile("return (1 + 2) / 3 * 4 ^ 5 % 6");
 }

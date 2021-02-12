@@ -477,6 +477,23 @@ pub const Compiler = struct {
             self.free_register = base + 1;
         }
 
+        pub fn prefix(self: *Func, un_op: Token, e: *ExpDesc) !void {
+            switch (un_op.id) {
+                .keyword_not => @panic("TODO"),
+                .single_char => switch (un_op.char.?) {
+                    '-' => {
+                        if (!e.isnumeral()) {
+                            _ = try self.exp2anyreg(e);
+                        }
+                        try self.codearith(.unm, e, null);
+                    },
+                    '#' => @panic("TODO"),
+                    else => unreachable,
+                },
+                else => unreachable,
+            }
+        }
+
         pub fn infix(self: *Func, bin_op: Token, e: *ExpDesc) !void {
             switch (bin_op.id) {
                 .keyword_and => @panic("TODO"),
@@ -515,18 +532,21 @@ pub const Compiler = struct {
             }
         }
 
-        pub fn codearith(self: *Func, op: OpCode, e1: *ExpDesc, e2: *ExpDesc) !void {
+        pub fn codearith(self: *Func, op: OpCode, e1: *ExpDesc, e2: ?*ExpDesc) !void {
             if (try self.constfolding(op, e1, e2)) {
                 return;
             } else {
-                // TODO when operator is unary minus or len, o2 should be zero
-                const o2 = try self.exp2RK(e2);
+                const o2 = if (e2 != null) try self.exp2RK(e2.?) else 0;
                 const o1 = try self.exp2RK(e1);
                 if (o1 > o2) {
                     try self.freeexp(e1);
-                    try self.freeexp(e2);
+                    if (e2 != null) {
+                        try self.freeexp(e2.?);
+                    }
                 } else {
-                    try self.freeexp(e2);
+                    if (e2 != null) {
+                        try self.freeexp(e2.?);
+                    }
                     try self.freeexp(e1);
                 }
                 const instruction_index = try self.emitInstruction(Instruction.BinaryMath.init(op, 0, o1, o2));
@@ -534,12 +554,13 @@ pub const Compiler = struct {
             }
         }
 
-        pub fn constfolding(self: *Func, op: OpCode, e1: *ExpDesc, e2: *ExpDesc) !bool {
-            // can only fold two number literals
-            if (!e1.isnumeral() or !e2.isnumeral()) return false;
+        pub fn constfolding(self: *Func, op: OpCode, e1: *ExpDesc, e2: ?*ExpDesc) !bool {
+            // can only fold number literals
+            if (e2 == null and !e1.isnumeral()) return false;
+            if (e2 != null and (!e1.isnumeral() or !e2.?.isnumeral())) return false;
 
             const v1: f64 = e1.desc.number;
-            const v2: f64 = e2.desc.number;
+            const v2: f64 = if (e2 != null) e2.?.desc.number else 0;
             var r: f64 = 0;
 
             switch (op) {
@@ -555,9 +576,8 @@ pub const Compiler = struct {
                     r = @mod(v1, v2);
                 },
                 .pow => r = std.math.pow(f64, v1, v2),
-                // TODO
-                //.unm
-                //.len
+                .unm => r = -v1,
+                //.len => return false,
                 else => unreachable,
             }
             // TODO numisnan
@@ -687,8 +707,14 @@ pub const Compiler = struct {
             .table_field => unreachable, // should never be called outside of genTableConstructor
             .binary_expression => try self.genBinaryExpression(@fieldParentPtr(Node.BinaryExpression, "base", node)),
             .grouped_expression => try self.genGroupedExpression(@fieldParentPtr(Node.GroupedExpression, "base", node)),
+            .unary_expression => try self.genUnaryExpression(@fieldParentPtr(Node.UnaryExpression, "base", node)),
             else => unreachable, // TODO
         }
+    }
+
+    pub fn genUnaryExpression(self: *Compiler, unary_expression: *Node.UnaryExpression) Error!void {
+        try self.genNode(unary_expression.argument);
+        try self.func.prefix(unary_expression.operator, &self.func.cur_exp);
     }
 
     pub fn genBinaryExpression(self: *Compiler, binary_expression: *Node.BinaryExpression) Error!void {
@@ -1159,4 +1185,10 @@ test "binary math operators" {
     try testCompile("return a + b / c * d ^ e % f");
     // const folding (the compiled version will fold this into a single constant)
     try testCompile("return (1 + 2) / 3 * 4 ^ 5 % 6");
+}
+
+test "unary minus" {
+    try testCompile("return -a");
+    try testCompile("return -1");
+    try testCompile("return -(1+2)");
 }

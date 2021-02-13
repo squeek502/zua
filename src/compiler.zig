@@ -519,7 +519,7 @@ pub const Compiler = struct {
             switch (bin_op.id) {
                 .keyword_and => @panic("TODO"),
                 .keyword_or => @panic("TODO"),
-                .concat => @panic("TODO"),
+                .concat => _ = try self.exp2nextreg(e),
                 .single_char => switch (bin_op.char.?) {
                     '+', '-', '*', '/', '%', '^' => {
                         if (!e.isnumeral()) {
@@ -538,7 +538,24 @@ pub const Compiler = struct {
             switch (bin_op.id) {
                 .keyword_and => @panic("TODO"),
                 .keyword_or => @panic("TODO"),
-                .concat => @panic("TODO"),
+                .concat => {
+                    try self.exp2val(e2);
+                    if (e2.desc == .relocable and self.getcode(e2).op == .concat) {
+                        const e1_result_register = e1.desc.nonreloc.result_register;
+                        var e2_instruction = @ptrCast(*Instruction.ABC, self.getcode(e2));
+                        std.debug.assert(e1_result_register == e2_instruction.b - 1);
+                        try self.freeexp(e1);
+                        e2_instruction.b = e1_result_register;
+                        e1.desc = .{ .relocable = .{ .instruction_index = e2.desc.relocable.instruction_index } };
+                    } else {
+                        // operand must be on the 'stack'
+                        // Note: Doing this avoids hitting unreachable when concatting
+                        // two number literals, since it would force a literal into
+                        // a register here (so the numeral check when const folding will fail).
+                        _ = try self.exp2nextreg(e2);
+                        try self.codearith(.concat, e1, e2);
+                    }
+                },
                 .single_char => switch (bin_op.char.?) {
                     '+', '-', '*', '/', '%', '^' => try self.codearith(Instruction.BinaryMath.tokenToOpCode(bin_op), e1, e2),
                     '>' => @panic("TODO"),
@@ -1226,4 +1243,11 @@ test "not operator" {
     try testCompile("return not 1");
     try testCompile("return not 0");
     try testCompile("return not ''");
+}
+
+test "concat operator" {
+    try testCompile("return 'a'..'b'");
+    try testCompile("return 'a'..'b'..'c'");
+    // this is a runtime error but it compiles
+    try testCompile("return 1 .. 2");
 }

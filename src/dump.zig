@@ -11,6 +11,9 @@ pub const luac_version: u8 = 0x51;
 pub const luac_format: u8 = 0;
 pub const luac_headersize = 12;
 
+// TODO make this actually optional, once we are actually capable of outputting debug info
+const strip_debug_info = true;
+
 pub fn write(chunk: Function, writer: anytype) @TypeOf(writer).Error!void {
     try writeHeader(writer);
     try writeFunction(chunk, writer);
@@ -30,7 +33,8 @@ pub fn writeHeader(writer: anytype) @TypeOf(writer).Error!void {
 
 pub fn writeFunction(function: Function, writer: anytype) @TypeOf(writer).Error!void {
     // source info
-    try writeString(function.name, writer);
+    const chunk_name: ?[]const u8 = if (strip_debug_info) null else function.name;
+    try writeString(chunk_name, writer);
     try writer.writeIntNative(c_int, 0); // TODO: line defined
     try writer.writeIntNative(c_int, 0); // TODO: last line defined
     try writer.writeByte(function.num_upvalues);
@@ -78,12 +82,12 @@ pub fn writeFunction(function: Function, writer: anytype) @TypeOf(writer).Error!
     // TODO: upvalues
 }
 
-pub fn writeString(string: []const u8, writer: anytype) @TypeOf(writer).Error!void {
-    if (string.len == 0) {
+pub fn writeString(string: ?[]const u8, writer: anytype) @TypeOf(writer).Error!void {
+    if (string == null) {
         try writer.writeIntNative(usize, 0);
     } else {
-        try writer.writeIntNative(usize, string.len + 1);
-        try writer.writeAll(string);
+        try writer.writeIntNative(usize, string.?.len + 1);
+        try writer.writeAll(string.?);
         try writer.writeByte(0);
     }
 }

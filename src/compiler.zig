@@ -1225,5 +1225,5 @@ test "not operator" {
     try testCompile("return not false");
     try testCompile("return not 1");
     try testCompile("return not 0");
-    try testCompile("return not 'a'");
+    try testCompile("return not ''");
 }

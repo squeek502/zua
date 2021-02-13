@@ -477,9 +477,27 @@ pub const Compiler = struct {
             self.free_register = base + 1;
         }
 
+        pub fn codenot(self: *Func, e: *ExpDesc) !void {
+            try self.dischargevars(e);
+            switch (e.desc) {
+                .nil, .@"false" => {
+                    e.desc = .{ .@"true" = {} };
+                },
+                .constant_index, .number, .@"true" => {
+                    e.desc = .{ .@"false" = {} };
+                },
+                .jmp => @panic("TODO"),
+                .relocable, .nonreloc => @panic("TODO"),
+                else => unreachable,
+            }
+            if (e.patch_list != null) {
+                @panic("TODO");
+            }
+        }
+
         pub fn prefix(self: *Func, un_op: Token, e: *ExpDesc) !void {
             switch (un_op.id) {
-                .keyword_not => @panic("TODO"),
+                .keyword_not => try self.codenot(e),
                 .single_char => switch (un_op.char.?) {
                     '-' => {
                         if (!e.isnumeral()) {
@@ -1200,4 +1218,12 @@ test "length operator" {
     try testCompile("return #a");
     try testCompile("return #(1+2)");
     try testCompile("return #{}");
+}
+
+test "not operator" {
+    try testCompile("return not true");
+    try testCompile("return not false");
+    try testCompile("return not 1");
+    try testCompile("return not 0");
+    try testCompile("return not 'a'");
 }

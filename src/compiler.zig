@@ -929,7 +929,9 @@ pub const Compiler = struct {
                 try self.func.setmultret(&self.func.cur_exp);
                 // tail call?
                 if (self.func.cur_exp.desc == .call and num_return_values.? == 1) {
-                    @panic("TODO tailcall");
+                    const instruction = self.func.getcode(&self.func.cur_exp);
+                    instruction.op = .tailcall;
+                    std.debug.assert(instruction.a == self.func.num_active_local_vars);
                 }
                 first_return_reg = self.func.num_active_local_vars;
                 num_return_values = null;
@@ -1250,4 +1252,8 @@ test "concat operator" {
     try testCompile("return 'a'..'b'..'c'");
     // this is a runtime error but it compiles
     try testCompile("return 1 .. 2");
+}
+
+test "tail call" {
+    try testCompile("return f()");
 }

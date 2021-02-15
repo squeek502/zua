@@ -41,6 +41,7 @@ pub const OpCode = packed enum(u6) {
     len = 20,
     concat = 21,
     call = 28,
+    tailcall = 29,
     @"return" = 30,
     setlist = 34,
     vararg = 37,
@@ -62,6 +63,7 @@ pub const OpCode = packed enum(u6) {
             .len => Instruction.Length,
             .concat => Instruction.Concat,
             .call => Instruction.Call,
+            .tailcall => Instruction.TailCall,
             .@"return" => Instruction.Return,
             .setlist => Instruction.SetList,
             .vararg => Instruction.VarArg,
@@ -497,6 +499,17 @@ pub const Instruction = packed struct {
         pub fn isMultipleReturns(self: *const Call) bool {
             return self.instruction.c == 0;
         }
+    };
+
+    pub const TailCall = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .Used,
+            .c_mode = .Used,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
     };
 
     pub const Return = packed struct {

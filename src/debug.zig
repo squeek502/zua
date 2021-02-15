@@ -135,11 +135,13 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                     last_instruction_that_changed_reg = i;
                 }
             },
-            //.concat => {},
+            .concat => {
+                if (b >= c) return error.ConcatRequiresAtLeastTwoOperands;
+            },
             //.tforloop => {},
             //.forloop, .forprep => {},
             //.jmp => {},
-            .call => {
+            .call, .tailcall => {
                 const call_inst = @bitCast(Instruction.Call, instruction);
                 if (b != 0) {
                     try checkreg(function, @intCast(usize, a + b - 1));

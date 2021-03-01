@@ -62,8 +62,7 @@ pub const OpCode = packed enum(u6) {
             .unm => Instruction.UnaryMinus,
             .len => Instruction.Length,
             .concat => Instruction.Concat,
-            .call => Instruction.Call,
-            .tailcall => Instruction.TailCall,
+            .call, .tailcall => Instruction.Call,
             .@"return" => Instruction.Return,
             .setlist => Instruction.SetList,
             .vararg => Instruction.VarArg,
@@ -461,6 +460,7 @@ pub const Instruction = packed struct {
         };
     };
 
+    /// Used for both call and tailcall opcodes
     pub const Call = packed struct {
         instruction: Instruction.ABC,
 
@@ -499,17 +499,6 @@ pub const Instruction = packed struct {
         pub fn isMultipleReturns(self: *const Call) bool {
             return self.instruction.c == 0;
         }
-    };
-
-    pub const TailCall = packed struct {
-        instruction: Instruction.ABC,
-
-        pub const meta: OpCode.OpMeta = .{
-            .b_mode = .Used,
-            .c_mode = .Used,
-            .test_a_mode = true,
-            .test_t_mode = false,
-        };
     };
 
     pub const Return = packed struct {

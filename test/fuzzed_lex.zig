@@ -91,7 +91,7 @@ test "fuzz_llex input/output pairs" {
         }
         var nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
         if (nearIndex) |i| {
-            std.testing.expectEqualStrings(expectedContents[0..i], result_stream.getWritten()[0..i]);
+            try std.testing.expectEqualStrings(expectedContents[0..i], result_stream.getWritten()[0..i]);
             if (printErrorContextDifferences) {
                 var lastLineEnding = std.mem.lastIndexOf(u8, expectedContents, "\n").? + 1;
                 const expectedError = expectedContents[lastLineEnding..];
@@ -101,7 +101,7 @@ test "fuzz_llex input/output pairs" {
                 }
             }
         } else {
-            std.testing.expectEqualStrings(expectedContents, result_stream.getWritten());
+            try std.testing.expectEqualStrings(expectedContents, result_stream.getWritten());
         }
         n += 1;
     }

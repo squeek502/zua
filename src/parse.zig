@@ -1221,14 +1221,14 @@ test "check hello world ast" {
     var tree = try parser.parse(std.testing.allocator);
     defer tree.deinit();
 
-    std.testing.expectEqual(Node.Id.chunk, tree.node.id);
+    try std.testing.expectEqual(Node.Id.chunk, tree.node.id);
     const chunk = tree.node.cast(.chunk).?;
-    std.testing.expectEqual(@as(usize, 1), chunk.body.len);
-    std.testing.expectEqual(Node.Id.call, chunk.body[0].id);
+    try std.testing.expectEqual(@as(usize, 1), chunk.body.len);
+    try std.testing.expectEqual(Node.Id.call, chunk.body[0].id);
     const call = chunk.body[0].cast(.call).?;
-    std.testing.expectEqual(Node.Id.identifier, call.expression.id);
-    std.testing.expectEqual(@as(usize, 1), call.arguments.len);
-    std.testing.expectEqual(Node.Id.literal, call.arguments[0].id);
+    try std.testing.expectEqual(Node.Id.identifier, call.expression.id);
+    try std.testing.expectEqual(@as(usize, 1), call.arguments.len);
+    try std.testing.expectEqual(Node.Id.literal, call.arguments[0].id);
 }
 
 fn testParse(source: []const u8, expected_ast_dump: []const u8) !void {
@@ -1242,11 +1242,11 @@ fn testParse(source: []const u8, expected_ast_dump: []const u8) !void {
     defer buf.deinit();
 
     try tree.dump(buf.writer());
-    std.testing.expectEqualStrings(expected_ast_dump, buf.items);
+    try std.testing.expectEqualStrings(expected_ast_dump, buf.items);
 }
 
-fn expectParseError(expected: ParseError, source: []const u8) void {
-    std.testing.expectError(expected, testParse(source, ""));
+fn expectParseError(expected: ParseError, source: []const u8) !void {
+    try std.testing.expectError(expected, testParse(source, ""));
 }
 
 test "hello world" {
@@ -1723,11 +1723,11 @@ test "assignment" {
 }
 
 test "assignment errors" {
-    expectParseError(ParseError.SyntaxError, "(a) = nil");
-    expectParseError(ParseError.UnexpectedSymbol, "(a)() = nil");
-    expectParseError(ParseError.FunctionArgumentsExpected, "a:b = nil");
-    expectParseError(ParseError.SyntaxError, "(a)");
-    expectParseError(ParseError.UnexpectedSymbol, "true = nil");
+    try expectParseError(ParseError.SyntaxError, "(a) = nil");
+    try expectParseError(ParseError.UnexpectedSymbol, "(a)() = nil");
+    try expectParseError(ParseError.FunctionArgumentsExpected, "a:b = nil");
+    try expectParseError(ParseError.SyntaxError, "(a)");
+    try expectParseError(ParseError.UnexpectedSymbol, "true = nil");
 }
 
 test "table constructors" {
@@ -1908,31 +1908,31 @@ test "operators" {
 }
 
 test "errors" {
-    expectParseError(ParseError.ExpectedDifferentToken, "untilû");
-    expectParseError(ParseError.ExpectedDifferentToken, "until");
+    try expectParseError(ParseError.ExpectedDifferentToken, "untilû");
+    try expectParseError(ParseError.ExpectedDifferentToken, "until");
 
     // return and break must be the last statement in a block
-    expectParseError(ParseError.ExpectedDifferentToken, "return; local a = 1");
-    expectParseError(ParseError.ExpectedDifferentToken, "for i=1,2 do break; local a = 1 end");
+    try expectParseError(ParseError.ExpectedDifferentToken, "return; local a = 1");
+    try expectParseError(ParseError.ExpectedDifferentToken, "for i=1,2 do break; local a = 1 end");
 
     // break must be in a loop
-    expectParseError(ParseError.NoLoopToBreak, "break");
+    try expectParseError(ParseError.NoLoopToBreak, "break");
 
-    expectParseError(ParseError.ExpectedDifferentToken,
+    try expectParseError(ParseError.ExpectedDifferentToken,
         \\local a = function()
         \\
         \\
     );
 
-    expectParseError(ParseError.ExpectedDifferentToken,
+    try expectParseError(ParseError.ExpectedDifferentToken,
         \\(
         \\
         \\a
         \\
     );
 
-    expectParseError(ParseError.AmbiguousSyntax, "f\n()");
-    expectParseError(ParseError.AmbiguousSyntax, "(\nf\n)\n()");
+    try expectParseError(ParseError.AmbiguousSyntax, "f\n()");
+    try expectParseError(ParseError.AmbiguousSyntax, "(\nf\n)\n()");
 
-    expectParseError(ParseError.VarArgOutsideVarArgFunction, "function a() local b = {...} end");
+    try expectParseError(ParseError.VarArgOutsideVarArgFunction, "function a() local b = {...} end");
 }

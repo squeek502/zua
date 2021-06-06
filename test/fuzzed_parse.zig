@@ -66,7 +66,7 @@ test "fuzzed_parse input/output pairs" {
         if (parser.parse(allocator)) |tree| {
             defer tree.deinit();
             if (is_error_expected) {
-                std.debug.print("{s}:\n```\n{e}\n```\n\nexpected error:\n{s}\n\ngot tree:\n", .{ entry.name, contents, expectedContents });
+                std.debug.print("{s}:\n```\n{s}\n```\n\nexpected error:\n{s}\n\ngot tree:\n", .{ entry.name, std.fmt.fmtSliceEscapeLower(contents), expectedContents });
                 try tree.dump(std.io.getStdErr().writer());
                 std.debug.print("\n", .{});
                 unreachable;
@@ -76,7 +76,7 @@ test "fuzzed_parse input/output pairs" {
             }
         } else |err| {
             if (is_bytecode_expected) {
-                std.debug.print("{s}:\n```\n{e}\n```\n\nexpected no error, got:\n{}\n", .{ entry.name, contents, err });
+                std.debug.print("{s}:\n```\n{s}\n```\n\nexpected no error, got:\n{}\n", .{ entry.name, std.fmt.fmtSliceEscapeLower(contents), err });
                 unreachable;
             } else {
                 if (isInErrorSet(err, zua.lex.LexError)) {
@@ -109,14 +109,14 @@ test "fuzzed_parse input/output pairs" {
 
                 var nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
                 if (nearIndex) |i| {
-                    std.testing.expectEqualStrings(expectedContents[0..i], err_msg[0..std.math.min(i, err_msg.len)]);
+                    try std.testing.expectEqualStrings(expectedContents[0..i], err_msg[0..std.math.min(i, err_msg.len)]);
                     if (printErrorContextDifferences) {
                         if (!std.mem.eql(u8, expectedContents, err_msg)) {
-                            std.debug.print("\n{s}\nexpected: {e}\nactual: {e}\n", .{ entry.name, expectedContents, err_msg });
+                            std.debug.print("\n{s}\nexpected: {s}\nactual: {s}\n", .{ entry.name, std.fmt.fmtSliceEscapeLower(expectedContents), std.fmt.fmtSliceEscapeLower(err_msg) });
                         }
                     }
                 } else {
-                    std.testing.expectEqualStrings(expectedContents, err_msg);
+                    try std.testing.expectEqualStrings(expectedContents, err_msg);
                 }
             }
         }

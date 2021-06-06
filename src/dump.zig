@@ -23,7 +23,7 @@ pub fn writeHeader(writer: anytype) @TypeOf(writer).Error!void {
     try writer.writeAll(signature);
     try writer.writeByte(luac_version);
     try writer.writeByte(luac_format);
-    try writer.writeByte(@boolToInt(builtin.endian == .Little));
+    try writer.writeByte(@boolToInt(builtin.target.cpu.arch.endian() == .Little));
     try writer.writeByte(@sizeOf(c_int));
     try writer.writeByte(@sizeOf(usize));
     try writer.writeByte(@sizeOf(opcodes.Instruction));

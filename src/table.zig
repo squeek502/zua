@@ -31,49 +31,51 @@ pub const Table = struct {
 
     const ArrayPortion = std.ArrayList(Value);
     const MapPortion = struct {
-        pub const HashMap: type = std.ArrayHashMap(Value, Value, keyHash, keyEql, false);
+        pub const HashMap: type = std.ArrayHashMap(Value, Value, KeyContext, false);
 
-        // TODO: This is woefully underimplemented
-        fn keyHash(key: Value) u32 {
-            switch (key) {
-                .boolean => |val| {
-                    const autoHashFn = std.array_hash_map.getAutoHashFn(@TypeOf(val));
-                    return autoHashFn(val);
-                },
-                .number => |val| {
-                    const floatBits = @typeInfo(@TypeOf(val)).Float.bits;
-                    const hashType = std.meta.Int(.unsigned, floatBits);
-                    const autoHashFn = std.array_hash_map.getAutoHashFn(hashType);
-                    return autoHashFn(@bitCast(hashType, val));
-                },
-                .string, .table, .function, .userdata, .thread => |val| {
-                    // TODO
-                    //const ptrHashFn = std.hash_map.getHashPtrAddrFn(*object.GCObject);
-                    //return ptrHashFn(val);
-                    return 0;
-                },
-                .light_userdata => |val| {
-                    const ptrHashFn = std.array_hash_map.getHashPtrAddrFn(@TypeOf(val));
-                    return ptrHashFn(val);
-                },
-                .nil => {
-                    // TODO: nil key will lead to a 'table index is nil' error
-                    // so might be able to short-circuit here instead
-                    return 0;
-                },
-                .none => unreachable,
-            }
-        }
-
-        fn keyEql(a: Value, b: Value) bool {
-            if (a.getType() != b.getType()) {
-                return false;
+        pub const KeyContext = struct {
+            // TODO: This is woefully underimplemented
+            pub fn hash(self: @This(), key: Value) u32 {
+                switch (key) {
+                    .boolean => |val| {
+                        const autoHashFn = std.array_hash_map.getAutoHashFn(@TypeOf(val), void);
+                        return autoHashFn({}, val);
+                    },
+                    .number => |val| {
+                        const floatBits = @typeInfo(@TypeOf(val)).Float.bits;
+                        const hashType = std.meta.Int(.unsigned, floatBits);
+                        const autoHashFn = std.array_hash_map.getAutoHashFn(hashType, void);
+                        return autoHashFn({}, @bitCast(hashType, val));
+                    },
+                    .string, .table, .function, .userdata, .thread => |val| {
+                        // TODO
+                        //const ptrHashFn = std.hash_map.getHashPtrAddrFn(*object.GCObject);
+                        //return ptrHashFn(val);
+                        return 0;
+                    },
+                    .light_userdata => |val| {
+                        const ptrHashFn = std.array_hash_map.getHashPtrAddrFn(@TypeOf(val), void);
+                        return ptrHashFn({}, val);
+                    },
+                    .nil => {
+                        // TODO: nil key will lead to a 'table index is nil' error
+                        // so might be able to short-circuit here instead
+                        return 0;
+                    },
+                    .none => unreachable,
+                }
             }
 
-            // TODO: type-specific eql
-            const autoEqlFn = std.array_hash_map.getAutoEqlFn(Value);
-            return autoEqlFn(a, b);
-        }
+            pub fn eql(self: @This(), a: Value, b: Value) bool {
+                if (a.getType() != b.getType()) {
+                    return false;
+                }
+
+                // TODO: type-specific eql
+                const autoEqlFn = std.array_hash_map.getAutoEqlFn(Value, void);
+                return autoEqlFn({}, a, b);
+            }
+        };
     };
 
     pub fn init(allocator: *Allocator) Table {
@@ -157,8 +159,8 @@ pub const Table = struct {
             },
             else => {},
         }
-        const kv = self.map.getEntry(key);
-        return if (kv != null) &(kv.?.value) else null;
+        const entry = self.map.getEntry(key);
+        return if (entry != null) entry.?.value_ptr else null;
     }
 
     // Some notes:
@@ -190,8 +192,8 @@ pub const Table = struct {
         //    error.InvalidArrayKey => {},
         //}
         // TODO: handle growing/shrinking the array portion
-        const kv = try self.map.getOrPutValue(key, Value.nil);
-        return &(kv.value);
+        const result = try self.map.getOrPutValue(key, Value.nil);
+        return result.value_ptr;
     }
 
     /// luaH_getn equivalent
@@ -310,9 +312,9 @@ pub const Table = struct {
         }
         if (self.map.getIndex(key)) |cur_map_i| {
             next_i = cur_map_i + 1;
-            const items = self.map.items();
+            var items = self.map.unmanaged.entries;
             if (items.len > next_i) {
-                const next_kv = items[next_i];
+                const next_kv = items.get(next_i);
                 return Table.KV{
                     .key = next_kv.key,
                     .value = next_kv.value,
@@ -322,8 +324,8 @@ pub const Table = struct {
             const first_kv = self.map.iterator().next();
             if (first_kv != null) {
                 return Table.KV{
-                    .key = first_kv.?.key,
-                    .value = first_kv.?.value,
+                    .key = first_kv.?.key_ptr.*,
+                    .value = first_kv.?.value_ptr.*,
                 };
             }
         }
@@ -338,10 +340,10 @@ test "arrayIndex" {
     const valid_num = Value{ .number = 10 };
     const invalid_num = Value{ .number = 5.5 };
 
-    std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(nil));
-    std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(str));
-    std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(invalid_num));
-    std.testing.expectEqual(@as(usize, 10), try Table.arrayIndex(valid_num));
+    try std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(nil));
+    try std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(str));
+    try std.testing.expectError(error.InvalidArrayKey, Table.arrayIndex(invalid_num));
+    try std.testing.expectEqual(@as(usize, 10), try Table.arrayIndex(valid_num));
 }
 
 test "init and initCapacity" {
@@ -361,28 +363,28 @@ test "get" {
 
     // because we pre-allocated the array portion, this will give us nil
     // instead of null
-    std.testing.expectEqual(Value.nil, tbl.get(Value{ .number = 1 }).?.*);
+    try std.testing.expectEqual(Value.nil, tbl.get(Value{ .number = 1 }).?.*);
 
     // hash map preallocation will still give us null though
     var dummyObj = object.GCObject{};
-    std.testing.expect(null == tbl.get(Value{ .string = &dummyObj }));
+    try std.testing.expect(null == tbl.get(Value{ .string = &dummyObj }));
 }
 
 test "getn" {
     var tbl = try Table.initCapacity(std.testing.allocator, 5, 5);
     defer tbl.deinit();
 
-    std.testing.expectEqual(@as(usize, 0), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 0), tbl.getn());
     const key = Value{ .number = 1 };
 
     const val = try tbl.getOrCreate(key);
-    std.testing.expectEqual(@as(usize, 0), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 0), tbl.getn());
 
     val.* = Value{ .number = 1 };
-    std.testing.expectEqual(@as(usize, 1), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 1), tbl.getn());
 
     val.* = Value.nil;
-    std.testing.expectEqual(@as(usize, 0), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 0), tbl.getn());
 }
 
 test "getn quirk 1" {
@@ -397,19 +399,19 @@ test "getn quirk 1" {
         val.* = key;
     }
     //   assert(#tbl == 6)
-    std.testing.expectEqual(@as(usize, 6), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 6), tbl.getn());
 
     //   tbl[3] = nil
     const val3 = tbl.get(Value{ .number = 3 }).?;
     val3.* = Value.nil;
     //   assert(#tbl == 6)
-    std.testing.expectEqual(@as(usize, 6), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 6), tbl.getn());
 
     //   tbl[6] = nil
     const val6 = tbl.get(Value{ .number = 6 }).?;
     val6.* = Value.nil;
     //   assert(#tbl == 2)
-    std.testing.expectEqual(@as(usize, 2), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 2), tbl.getn());
 }
 
 test "getn quirk 2" {
@@ -427,19 +429,19 @@ test "getn quirk 2" {
         val.* = if (i != 3) key else Value.nil;
     }
     //   assert(#tbl == 5)
-    std.testing.expectEqual(@as(usize, 5), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 5), tbl.getn());
 
     //   tbl[10] = 10
     const val10 = try tbl.getOrCreate(Value{ .number = 10 });
     val10.* = Value{ .number = 10 };
     //   assert(#tbl == 10)
-    std.testing.expectEqual(@as(usize, 10), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 10), tbl.getn());
 
     //   tbl[20] = 20
     const val20 = try tbl.getOrCreate(Value{ .number = 20 });
     val20.* = Value{ .number = 20 };
     //   assert(#tbl == 20)
-    std.testing.expectEqual(@as(usize, 20), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 20), tbl.getn());
 
     //   i = 40
     //   while i<2147483647 do
@@ -452,7 +454,7 @@ test "getn quirk 2" {
         val.* = Value{ .number = @intToFloat(f64, i) };
     }
     //   assert(#tbl == 2)
-    std.testing.expectEqual(@as(usize, 2), tbl.getn());
+    try std.testing.expectEqual(@as(usize, 2), tbl.getn());
 }
 
 test "getn quirk 2, next iterator" {
@@ -481,5 +483,5 @@ test "getn quirk 2, next iterator" {
         iterations += 1;
         kv = next_kv;
     }
-    std.testing.expectEqual(expected_iterations, iterations);
+    try std.testing.expectEqual(expected_iterations, iterations);
 }

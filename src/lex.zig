@@ -298,7 +298,7 @@ pub const Lexer = struct {
     }
 
     pub fn dump(self: *Self, token: *const Token) void {
-        std.debug.warn("{s} {s}:{d}: \"{e}\"\n", .{ @tagName(token.id), token.nameForDisplay(), token.line_number, self.buffer[token.start..token.end] });
+        std.debug.warn("{s} {s}:{d}: \"{s}\"\n", .{ @tagName(token.id), token.nameForDisplay(), token.line_number, std.fmt.fmtSliceEscapeLower(self.buffer[token.start..token.end]) });
     }
 
     const State = enum {
@@ -1062,55 +1062,55 @@ test "numbers" {
 }
 
 test "LexError.MalformedNumber" {
-    expectLexError(LexError.MalformedNumber, testLex("1e", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0z", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0x", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0xabcz", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("1xabc", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1.e2", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1.", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1.2", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e3a", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e-", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e-a", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e+", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e--2", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e-)2", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0.1e+-2", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("1e", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0z", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0x", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0xabcz", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("1xabc", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1.e2", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1.", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1.2", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1e3a", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1e-", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1e-a", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1e+", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1e--2", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1e-)2", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0.1e+-2", &[_]Token.Id{Token.Id.number}));
     // Lua's lexer weirdly 'allows'/consumes _ when lexing numbers (see llex.c:201 in 5.1.5),
     // but as far as I can tell there are no valid ways to define a number with a _ in it.
     // Either way, we should fail with MalformedNumber in the same ways that Lua does,
     // so we need to handle _ similarly to the Lua lexer.
-    expectLexError(LexError.MalformedNumber, testLex("1_2", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0x2__", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("0x__", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("1e__", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex("1e-1_", &[_]Token.Id{Token.Id.number}));
-    expectLexError(LexError.MalformedNumber, testLex(".1_", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("1_2", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0x2__", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("0x__", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("1e__", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex("1e-1_", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLex(".1_", &[_]Token.Id{Token.Id.number}));
 }
 
 test "LexError.InvalidLongStringDelimiter" {
     // see comment in Lexer.next near the return of LexError.InvalidLongStringDelimiter
     const simple = testLex("[==]", &[_]Token.Id{Token.Id.string});
-    expectLexError(LexError.InvalidLongStringDelimiter, simple);
+    try expectLexError(LexError.InvalidLongStringDelimiter, simple);
 
     const number = testLex("[=======4", &[_]Token.Id{Token.Id.string});
-    expectLexError(LexError.InvalidLongStringDelimiter, number);
+    try expectLexError(LexError.InvalidLongStringDelimiter, number);
 
     const eof = testLex("[==", &[_]Token.Id{Token.Id.string});
-    expectLexError(LexError.InvalidLongStringDelimiter, eof);
+    try expectLexError(LexError.InvalidLongStringDelimiter, eof);
 }
 
 test "LexError.EscapeSequenceTooLarge" {
-    expectLexError(LexError.EscapeSequenceTooLarge, testLex("'\\256'", &[_]Token.Id{Token.Id.string}));
+    try expectLexError(LexError.EscapeSequenceTooLarge, testLex("'\\256'", &[_]Token.Id{Token.Id.string}));
 }
 
 test "LexError.UnfinishedLongComment" {
     const simple = testLex("--[[", &[_]Token.Id{});
-    expectLexError(LexError.UnfinishedLongComment, simple);
+    try expectLexError(LexError.UnfinishedLongComment, simple);
 
     const mismatchedSep = testLex("--[==[ ]=]", &[_]Token.Id{});
-    expectLexError(LexError.UnfinishedLongComment, mismatchedSep);
+    try expectLexError(LexError.UnfinishedLongComment, mismatchedSep);
 }
 
 test "LexError.UnfinishedString" {
@@ -1120,7 +1120,7 @@ test "LexError.UnfinishedString" {
         Token.Id.single_char,
         Token.Id.string,
     });
-    expectLexError(LexError.UnfinishedString, missingQuoteResult);
+    try expectLexError(LexError.UnfinishedString, missingQuoteResult);
 
     const newlineResult = testLex("local hello = \"wor\\\"ld\n\"", &[_]Token.Id{
         Token.Id.keyword_local,
@@ -1128,7 +1128,7 @@ test "LexError.UnfinishedString" {
         Token.Id.single_char,
         Token.Id.string,
     });
-    expectLexError(LexError.UnfinishedString, newlineResult);
+    try expectLexError(LexError.UnfinishedString, newlineResult);
 }
 
 test "5.1 check_next bug compat on" {
@@ -1153,7 +1153,7 @@ test "5.1 check_next bug compat on" {
         Token.Id.single_char,
         Token.Id.name,
     });
-    expectLexError(LexError.MalformedNumber, testLexCheckNextBugCompat("1e\x005", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLexCheckNextBugCompat("1e\x005", &[_]Token.Id{Token.Id.number}));
 }
 
 test "5.1 check_next bug compat off" {
@@ -1171,12 +1171,12 @@ test "5.1 check_next bug compat off" {
         Token.Id.single_char,
         Token.Id.single_char,
     });
-    expectLexError(LexError.MalformedNumber, testLexNoCheckNextBugCompat("1e\x005", &[_]Token.Id{Token.Id.number}));
+    try expectLexError(LexError.MalformedNumber, testLexNoCheckNextBugCompat("1e\x005", &[_]Token.Id{Token.Id.number}));
 }
 
-fn expectLexError(expected: LexError, actual: anytype) void {
+fn expectLexError(expected: LexError, actual: anytype) !void {
     if (veryVerboseLexing) std.debug.warn("\n", .{});
-    std.testing.expectError(expected, actual);
+    try std.testing.expectError(expected, actual);
     if (dumpTokensDuringTests) std.debug.warn("{}\n", .{actual});
 }
 
@@ -1202,10 +1202,10 @@ fn testLexInitialized(lexer: *Lexer, expected_tokens: []const Token.Id) !void {
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);
-        std.testing.expectEqual(expected_token_id, token.id);
+        try std.testing.expectEqual(expected_token_id, token.id);
     }
     const last_token = try lexer.next();
-    std.testing.expectEqual(Token.Id.eof, last_token.id);
+    try std.testing.expectEqual(Token.Id.eof, last_token.id);
 }
 
 test "line numbers" {
@@ -1252,8 +1252,8 @@ fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineN
     for (expected_tokens) |expected_token| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);
-        std.testing.expectEqual(expected_token.id, token.id);
-        std.testing.expectEqual(expected_token.line_number, token.line_number);
+        try std.testing.expectEqual(expected_token.id, token.id);
+        try std.testing.expectEqual(expected_token.line_number, token.line_number);
         if (token.id == Token.Id.eof) {
             return;
         }
@@ -1268,10 +1268,10 @@ test "chunk has too many lines" {
 
     while (true) {
         const token = max_lines_lexer.next() catch |err| {
-            std.testing.expectEqual(LexError.ChunkHasTooManyLines, err);
+            try std.testing.expectEqual(LexError.ChunkHasTooManyLines, err);
             const err_msg = try max_lines_lexer.renderErrorAlloc(std.testing.allocator);
             defer std.testing.allocator.free(err_msg);
-            std.testing.expectEqualStrings(
+            try std.testing.expectEqualStrings(
                 "[string \"max_lines\"]:4: chunk has too many lines",
                 err_msg,
             );
@@ -1295,10 +1295,10 @@ test "lexical element too long" {
 
     while (true) {
         const token = max_size_lexer.next() catch |err| {
-            std.testing.expectEqual(LexError.LexicalElementTooLong, err);
+            try std.testing.expectEqual(LexError.LexicalElementTooLong, err);
             const err_msg = try max_size_lexer.renderErrorAlloc(std.testing.allocator);
             defer std.testing.allocator.free(err_msg);
-            std.testing.expectEqualStrings(
+            try std.testing.expectEqualStrings(
                 "[string \"max_size\"]:3: lexical element too long",
                 err_msg,
             );

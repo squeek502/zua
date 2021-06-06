@@ -613,12 +613,12 @@ pub const Instruction = packed struct {
 };
 
 test "sBx" {
-    std.testing.expectEqual(
+    try std.testing.expectEqual(
         @as(i18, Instruction.AsBx.min_sbx),
         Instruction.AsBx.unsignedBxToSigned(0),
     );
     const max_sbx_as_bx = Instruction.AsBx.signedBxToUnsigned(Instruction.AsBx.max_sbx);
-    std.testing.expectEqual(
+    try std.testing.expectEqual(
         @as(i18, Instruction.AsBx.max_sbx),
         Instruction.AsBx.unsignedBxToSigned(max_sbx_as_bx),
     );

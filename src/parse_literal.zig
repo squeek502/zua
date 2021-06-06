@@ -143,27 +143,27 @@ pub fn parseString(source_raw: []const u8, dest_buf: []u8) []u8 {
 test "parseString" {
     var buf_arr: [100]u8 = undefined;
     var buf: []u8 = buf_arr[0..];
-    std.testing.expectEqualSlices(u8, "hello", parseString("'hello'", buf));
-    std.testing.expectEqualSlices(u8, "hello", parseString("\"hello\"", buf));
-    std.testing.expectEqualSlices(u8, "hello", parseString("[[hello]]", buf));
-    std.testing.expectEqualSlices(u8, "hello", parseString("[=[hello]=]", buf));
-    std.testing.expectEqualSlices(u8, "hello", parseString("[===[hello]===]", buf));
-    std.testing.expectEqualSlices(u8, "\\ \n \x0B", parseString("'\\\\ \\n \\v'", buf));
+    try std.testing.expectEqualSlices(u8, "hello", parseString("'hello'", buf));
+    try std.testing.expectEqualSlices(u8, "hello", parseString("\"hello\"", buf));
+    try std.testing.expectEqualSlices(u8, "hello", parseString("[[hello]]", buf));
+    try std.testing.expectEqualSlices(u8, "hello", parseString("[=[hello]=]", buf));
+    try std.testing.expectEqualSlices(u8, "hello", parseString("[===[hello]===]", buf));
+    try std.testing.expectEqualSlices(u8, "\\ \n \x0B", parseString("'\\\\ \\n \\v'", buf));
 
     // long strings skip initial newline
-    std.testing.expectEqualSlices(u8, "hello", parseString("[[\nhello]]", buf));
-    std.testing.expectEqualSlices(u8, "\nhello", parseString("[[\r\rhello]]", buf));
+    try std.testing.expectEqualSlices(u8, "hello", parseString("[[\nhello]]", buf));
+    try std.testing.expectEqualSlices(u8, "\nhello", parseString("[[\r\rhello]]", buf));
 
     // escaped \r gets transformed into \n
-    std.testing.expectEqualSlices(u8, "\n", parseString("\"\\\r\"", buf));
+    try std.testing.expectEqualSlices(u8, "\n", parseString("\"\\\r\"", buf));
 
     // escaped newlines and newline pairs
-    std.testing.expectEqualSlices(u8, "\n\\ ", parseString("\"\\\r\\\\ \"", buf));
-    std.testing.expectEqualSlices(u8, "\n\\ ", parseString("\"\\\r\n\\\\ \"", buf));
-    std.testing.expectEqualSlices(u8, "\n", parseString("\"\\\n\r\"", buf));
+    try std.testing.expectEqualSlices(u8, "\n\\ ", parseString("\"\\\r\\\\ \"", buf));
+    try std.testing.expectEqualSlices(u8, "\n\\ ", parseString("\"\\\r\n\\\\ \"", buf));
+    try std.testing.expectEqualSlices(u8, "\n", parseString("\"\\\n\r\"", buf));
 
     // escaped numerals
-    std.testing.expectEqualSlices(u8, "\x01-\x02", parseString("\"\\1-\\2\"", buf));
+    try std.testing.expectEqualSlices(u8, "\x01-\x02", parseString("\"\\1-\\2\"", buf));
 }
 
 // FIXME: this is not even close to 1:1 compatible with Lua's number parsing
@@ -193,21 +193,21 @@ pub fn parseNumber(source: []const u8) f64 {
 }
 
 test "parseNumber decimal" {
-    std.testing.expectEqual(@as(f64, 1.0), parseNumber("1"));
-    std.testing.expectEqual(@as(f64, 2000.0), parseNumber("2e3"));
-    std.testing.expectEqual(@as(f64, 1234.0), parseNumber("1.234e3"));
+    try std.testing.expectEqual(@as(f64, 1.0), parseNumber("1"));
+    try std.testing.expectEqual(@as(f64, 2000.0), parseNumber("2e3"));
+    try std.testing.expectEqual(@as(f64, 1234.0), parseNumber("1.234e3"));
 }
 
 test "parseNumber hex" {
-    std.testing.expectEqual(@as(f64, 0x0), parseNumber("0x0"));
-    std.testing.expectEqual(@as(f64, 0xf), parseNumber("0xf"));
+    try std.testing.expectEqual(@as(f64, 0x0), parseNumber("0x0"));
+    try std.testing.expectEqual(@as(f64, 0xf), parseNumber("0xf"));
 
     // strtod in C99 handles hex digits
     // this would overflow with the strtoul fallback
-    //std.testing.expectEqual(@as(f64, 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff), parseNumber("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
+    //try std.testing.expectEqual(@as(f64, 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff), parseNumber("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"));
 
     // because Lua uses strtod internally, it actually can accept
     // hex constants with a power exponent (denoted by p)
     // FIXME: allow this pattern in the lexer once parseNumber can handle it
-    //std.testing.expectEqual(@as(f64, 1020), parseNumber("0xffp2"));
+    //try std.testing.expectEqual(@as(f64, 1020), parseNumber("0xffp2"));
 }

@@ -68,8 +68,8 @@ test "collectability" {
     const nil = Value.nil;
     var dummyObj = GCObject{};
     const str = Value{ .string = &dummyObj };
-    std.testing.expect(!nil.isCollectable());
-    std.testing.expect(str.isCollectable());
+    try std.testing.expect(!nil.isCollectable());
+    try std.testing.expect(str.isCollectable());
 }
 
 /// Called Proto in Lua (lobject.h)
@@ -177,40 +177,42 @@ pub const Constant = union(Constant.Type) {
         boolean,
     };
 
-    fn hash(constant: Constant) u64 {
-        switch (constant) {
-            .boolean => |val| {
-                const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val));
-                return autoHashFn(val);
-            },
-            .number => |val| {
-                const floatBits = @typeInfo(@TypeOf(val)).Float.bits;
-                const hashType = std.meta.Int(.unsigned, floatBits);
-                const autoHashFn = std.hash_map.getAutoHashFn(hashType);
-                return autoHashFn(@bitCast(hashType, val));
-            },
-            .string => |val| {
-                return std.hash_map.hashString(val);
-            },
-            .nil => {
-                return 0;
-            },
+    pub const HashContext = struct {
+        pub fn hash(self: @This(), constant: Constant) u64 {
+            switch (constant) {
+                .boolean => |val| {
+                    const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val), void);
+                    return autoHashFn({}, val);
+                },
+                .number => |val| {
+                    const floatBits = @typeInfo(@TypeOf(val)).Float.bits;
+                    const hashType = std.meta.Int(.unsigned, floatBits);
+                    const autoHashFn = std.hash_map.getAutoHashFn(hashType, void);
+                    return autoHashFn({}, @bitCast(hashType, val));
+                },
+                .string => |val| {
+                    return std.hash_map.hashString(val);
+                },
+                .nil => {
+                    return 0;
+                },
+            }
         }
-    }
 
-    fn eql(a: Constant, b: Constant) bool {
-        if (@as(Constant.Type, a) != @as(Constant.Type, b)) {
-            return false;
+        pub fn eql(self: @This(), a: Constant, b: Constant) bool {
+            if (@as(Constant.Type, a) != @as(Constant.Type, b)) {
+                return false;
+            }
+            return switch (a) {
+                .string => std.mem.eql(u8, a.string, b.string),
+                .number => a.number == b.number,
+                .boolean => a.boolean == b.boolean,
+                .nil => true,
+            };
         }
-        return switch (a) {
-            .string => std.mem.eql(u8, a.string, b.string),
-            .number => a.number == b.number,
-            .boolean => a.boolean == b.boolean,
-            .nil => true,
-        };
-    }
+    };
 
-    pub const Map = std.HashMap(Constant, usize, Constant.hash, Constant.eql, std.hash_map.DefaultMaxLoadPercentage);
+    pub const Map = std.HashMap(Constant, usize, Constant.HashContext, std.hash_map.DefaultMaxLoadPercentage);
 };
 
 /// Turns a 'source' string into a chunk id for display in errors, etc.
@@ -274,28 +276,28 @@ pub fn getChunkId(source: []const u8, buf: []u8) []u8 {
 
 test "getChunkId" {
     var buf: [50]u8 = undefined;
-    std.testing.expectEqualStrings("something", getChunkId("=something", &buf));
-    std.testing.expectEqualStrings(
+    try std.testing.expectEqualStrings("something", getChunkId("=something", &buf));
+    try std.testing.expectEqualStrings(
         "something that is long enough to actually need tru",
         getChunkId("=something that is long enough to actually need truncation", &buf),
     );
 
-    std.testing.expectEqualStrings("something", getChunkId("@something", &buf));
-    std.testing.expectEqualStrings(
+    try std.testing.expectEqualStrings("something", getChunkId("@something", &buf));
+    try std.testing.expectEqualStrings(
         ".../is/long/enough/to/actually/need/truncation.lua",
         getChunkId("@something/that/is/long/enough/to/actually/need/truncation.lua", &buf),
     );
 
-    std.testing.expectEqualStrings("[string \"something\"]", getChunkId("something", &buf));
-    std.testing.expectEqualStrings("[string \"some\"]", getChunkId("some\nthing", &buf));
-    std.testing.expectEqualStrings("[string \"some\"]", getChunkId("some\rthing", &buf));
-    std.testing.expectEqualStrings(
+    try std.testing.expectEqualStrings("[string \"something\"]", getChunkId("something", &buf));
+    try std.testing.expectEqualStrings("[string \"some\"]", getChunkId("some\nthing", &buf));
+    try std.testing.expectEqualStrings("[string \"some\"]", getChunkId("some\rthing", &buf));
+    try std.testing.expectEqualStrings(
         "[string \"something that is long enough to act...\"]",
         getChunkId("something that is long enough to actually need truncation", &buf),
     );
 
     var min_buf: [14]u8 = undefined;
-    std.testing.expectEqualStrings("[string \"...\"]", getChunkId("anything", &min_buf));
+    try std.testing.expectEqualStrings("[string \"...\"]", getChunkId("anything", &min_buf));
 }
 
 pub const max_floating_point_byte = 0b1111 << (0b11111 - 1);
@@ -333,17 +335,17 @@ pub fn floatingPointByteToInt(_x: u8) FloatingPointByteIntType {
 }
 
 test "intToFloatingPointByte" {
-    std.testing.expectEqual(@as(u8, 0), intToFloatingPointByte(0));
-    std.testing.expectEqual(@as(u8, 8), intToFloatingPointByte(8));
-    std.testing.expectEqual(@as(u8, 9), intToFloatingPointByte(9));
-    std.testing.expectEqual(@as(u8, 29), intToFloatingPointByte(51));
-    std.testing.expectEqual(@as(u8, 64), intToFloatingPointByte(1000));
-    std.testing.expectEqual(@as(u8, 64), intToFloatingPointByte(1001));
-    std.testing.expectEqual(@as(u8, 65), intToFloatingPointByte(1025));
-    std.testing.expectEqual(@as(u8, 255), intToFloatingPointByte(max_floating_point_byte));
+    try std.testing.expectEqual(@as(u8, 0), intToFloatingPointByte(0));
+    try std.testing.expectEqual(@as(u8, 8), intToFloatingPointByte(8));
+    try std.testing.expectEqual(@as(u8, 9), intToFloatingPointByte(9));
+    try std.testing.expectEqual(@as(u8, 29), intToFloatingPointByte(51));
+    try std.testing.expectEqual(@as(u8, 64), intToFloatingPointByte(1000));
+    try std.testing.expectEqual(@as(u8, 64), intToFloatingPointByte(1001));
+    try std.testing.expectEqual(@as(u8, 65), intToFloatingPointByte(1025));
+    try std.testing.expectEqual(@as(u8, 255), intToFloatingPointByte(max_floating_point_byte));
 
-    std.testing.expectEqual(@as(FloatingPointByteIntType, 52), floatingPointByteToInt(29));
-    std.testing.expectEqual(@as(FloatingPointByteIntType, 1024), floatingPointByteToInt(64));
-    std.testing.expectEqual(@as(FloatingPointByteIntType, 1152), floatingPointByteToInt(65));
-    std.testing.expectEqual(@as(FloatingPointByteIntType, max_floating_point_byte), floatingPointByteToInt(255));
+    try std.testing.expectEqual(@as(FloatingPointByteIntType, 52), floatingPointByteToInt(29));
+    try std.testing.expectEqual(@as(FloatingPointByteIntType, 1024), floatingPointByteToInt(64));
+    try std.testing.expectEqual(@as(FloatingPointByteIntType, 1152), floatingPointByteToInt(65));
+    try std.testing.expectEqual(@as(FloatingPointByteIntType, max_floating_point_byte), floatingPointByteToInt(255));
 }

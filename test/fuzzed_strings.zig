@@ -63,7 +63,7 @@ test "string input/output pairs" {
                 std.debug.warn("got\n{x}\n", .{parsed});
                 std.debug.warn("expected\n{x}\n", .{expectedContents});
             }
-            std.testing.expectEqualSlices(u8, expectedContents, parsed);
+            try std.testing.expectEqualSlices(u8, expectedContents, parsed);
         }
         n += 1;
     }

@@ -278,11 +278,11 @@ pub const Compiler = struct {
         pub fn putConstant(self: *Func, constant: Constant) Error!usize {
             const result = try self.constants_map.getOrPut(constant);
             if (result.found_existing) {
-                return result.entry.value;
+                return result.value_ptr.*;
             } else {
-                result.entry.value = self.constants.items.len;
+                result.value_ptr.* = self.constants.items.len;
                 try self.constants.append(constant);
-                return result.entry.value;
+                return result.value_ptr.*;
             }
         }
 
@@ -1131,7 +1131,7 @@ fn testCompile(source: []const u8) !void {
     //std.debug.print("\n", .{});
     //chunk.printCode();
 
-    std.testing.expectEqualSlices(u8, luacDump, buf.items);
+    try std.testing.expectEqualSlices(u8, luacDump, buf.items);
 }
 
 test "compile hello world" {

@@ -16,17 +16,11 @@ const verboseTestPrinting = false;
 const printErrorContextDifferences = false;
 
 const build_options = @import("build_options");
-const inputs_dir_opt = build_options.fuzzed_parse_inputs_dir;
-const outputs_dir_opt = build_options.fuzzed_parse_outputs_dir;
+const inputs_dir_path = build_options.fuzzed_parse_inputs_dir;
+const outputs_dir_path = build_options.fuzzed_parse_outputs_dir;
 
 test "fuzzed_parse input/output pairs" {
     const allocator = std.testing.allocator;
-
-    // resolve these now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
-    defer allocator.free(inputs_dir_path);
-    const outputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{outputs_dir_opt});
-    defer allocator.free(outputs_dir_path);
 
     var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
     defer inputs_dir.close();

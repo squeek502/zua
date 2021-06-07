@@ -31,8 +31,8 @@ pub fn parseString(source_raw: []const u8, dest_buf: []u8) []u8 {
     source = source[delim_len .. source.len - delim_len];
     if (skip_first_char) source = source[1..];
 
-    // like std.io.SliceOutStream but no need to check bounds of slice
-    // and can only append 1 character at a time (also doesn't implement Stream)
+    // like std.io.FixedBufferStream but no need to check bounds of slice
+    // and can only append 1 character at a time
     const SliceWriter = struct {
         const Self = @This();
 

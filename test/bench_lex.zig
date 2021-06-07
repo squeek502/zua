@@ -9,6 +9,8 @@ const hash_map = std.hash_map;
 // be obtained from https://github.com/squeek502/fuzzing-lua
 
 var timer: Timer = undefined;
+const build_options = @import("build_options");
+const inputs_dir_path = build_options.fuzzed_lex_inputs_dir;
 
 test "bench fuzz_llex inputs" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -17,10 +19,6 @@ test "bench fuzz_llex inputs" {
 
     timer = try Timer.start();
 
-    const build_options = @import("build_options");
-    const inputs_dir_opt = build_options.fuzzed_lex_inputs_dir;
-    // resolve this now since Zig's std lib on Windows rejects paths with / as the path sep
-    const inputs_dir_path = try std.fs.path.resolve(allocator, &[_][]const u8{inputs_dir_opt});
     var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
     defer inputs_dir.close();
 

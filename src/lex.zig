@@ -121,7 +121,7 @@ pub const Token = struct {
     };
 
     // A mapping of id -> name pairs as an array
-    const keywordNames = comptime blk: {
+    const keywordNames = blk: {
         // FIXME: This relies on the keyword enums starting at 0 and being contiguous
         var array: [keywordMapping.len][]const u8 = undefined;
         for (keywordMapping) |mapping| {

@@ -98,9 +98,9 @@ pub const Function = struct {
 
         pub fn undump(dumped: u8) Function.VarArgs {
             return Function.VarArgs{
-                .has_arg = @intToBool(dumped & 1),
-                .is_var_arg = @intToBool(dumped & 2),
-                .needs_arg = @intToBool(dumped & 4),
+                .has_arg = (dumped & 1) == 1,
+                .is_var_arg = (dumped & 2) == 2,
+                .needs_arg = (dumped & 4) == 4,
             };
         }
     };
@@ -157,7 +157,10 @@ pub const Function = struct {
                         std.debug.print("{d} {d}", .{ a, bx });
                     }
                 },
-                .iAsBx => {},
+                .iAsBx => {
+                    // TODO
+                    _ = sbx;
+                },
             }
             std.debug.print("\n", .{});
         }
@@ -179,6 +182,7 @@ pub const Constant = union(Constant.Type) {
 
     pub const HashContext = struct {
         pub fn hash(self: @This(), constant: Constant) u64 {
+            _ = self; // TODO: is there a better way to avoid unused param error?
             switch (constant) {
                 .boolean => |val| {
                     const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val), void);
@@ -200,6 +204,7 @@ pub const Constant = union(Constant.Type) {
         }
 
         pub fn eql(self: @This(), a: Constant, b: Constant) bool {
+            _ = self; // TODO: is there a better way to avoid unused param error?
             if (@as(Constant.Type, a) != @as(Constant.Type, b)) {
                 return false;
             }

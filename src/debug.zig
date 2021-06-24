@@ -168,9 +168,7 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 if (b > 0) {
                     try checkreg(function, @intCast(usize, a + b));
                 }
-                if (c == 0) {
-                    // if C is zero, then the next instruction is just a u32 containing
-                    // the batch number
+                if (setlist_inst.isBatchNumberStoredInNextInstruction()) {
                     if (i + 1 >= function.code.len) return error.ExpectedSetListBatchNumberInstruction;
                     instructions_to_skip += 1;
                 }

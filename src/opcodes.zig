@@ -19,7 +19,7 @@ const Token = zua.lex.Token;
 // represented by 2*max), which is half the maximum for the corresponding
 // unsigned argument.
 
-pub const OpCode = packed enum(u6) {
+pub const OpCode = enum(u6) {
     // TODO: rest of the opcodes
     move = 0,
     loadk = 1,
@@ -76,7 +76,7 @@ pub const OpCode = packed enum(u6) {
     };
 
     // A mapping of OpCode -> OpMode
-    const op_modes = comptime blk: {
+    const op_modes = blk: {
         const max_fields = std.math.maxInt(@typeInfo(OpCode).Enum.tag_type);
         var array: [max_fields]OpMode = undefined;
         for (@typeInfo(OpCode).Enum.fields) |field| {
@@ -110,7 +110,7 @@ pub const OpCode = packed enum(u6) {
         test_t_mode: bool,
     };
 
-    const op_meta = comptime blk: {
+    const op_meta = blk: {
         const max_fields = std.math.maxInt(@typeInfo(OpCode).Enum.tag_type);
         var array: [max_fields]*const OpMeta = undefined;
         for (@typeInfo(OpCode).Enum.fields) |field| {
@@ -221,7 +221,7 @@ pub const Instruction = packed struct {
             return .{
                 .op = op,
                 .a = a,
-                ._bx = bx,
+                ._bx = signedBxToUnsigned(sbx),
             };
         }
 
@@ -238,12 +238,12 @@ pub const Instruction = packed struct {
         pub const min_sbx = -max_sbx;
 
         pub fn unsignedBxToSigned(Bx: u18) i18 {
-            comptime const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
+            const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
             return @intCast(i18, @intCast(fitting_int, Bx) - max_sbx);
         }
 
         pub fn signedBxToUnsigned(sBx: i18) u18 {
-            comptime const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
+            const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
             return @intCast(u18, @intCast(fitting_int, sBx) + max_sbx);
         }
     };
@@ -558,6 +558,13 @@ pub const Instruction = packed struct {
             .test_a_mode = false,
             .test_t_mode = false,
         };
+
+        // TODO init fn + get/setters as needed, should probably move the logic of setlist
+        // in compiler to here
+
+        pub fn isBatchNumberStoredInNextInstruction(self: *const SetList) bool {
+            return self.instruction.c == 0;
+        }
 
         /// equivalent to LFIELDS_PER_FLUSH from lopcodes.h
         pub const fields_per_flush = 50;

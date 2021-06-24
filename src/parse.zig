@@ -654,7 +654,7 @@ pub const Parser = struct {
                 switch (self.state.token.id) {
                     .name => {
                         // TODO presumably should catch EOF or errors here and translate them to more appropriate errors
-                        const lookahead_token = self.lexer.lookahead() catch |err| {
+                        const lookahead_token = self.lexer.lookahead() catch {
                             break :get_field try self.listfield();
                         };
                         if (lookahead_token.isChar('=')) {
@@ -865,7 +865,6 @@ pub const Parser = struct {
         defer arguments.deinit();
 
         var expression = try self.prefixexp();
-        var is_func_call = false;
         loop: while (true) {
             switch (self.state.token.id) {
                 .single_char => {
@@ -1218,7 +1217,7 @@ test "check hello world ast" {
     const source = "print \"hello world\"";
     var lexer = Lexer.init(source, source);
     var parser = Parser.init(&lexer);
-    var tree = try parser.parse(std.testing.allocator);
+    var tree = try parser.parse(allocator);
     defer tree.deinit();
 
     try std.testing.expectEqual(Node.Id.chunk, tree.node.id);

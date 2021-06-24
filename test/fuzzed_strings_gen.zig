@@ -38,7 +38,7 @@ pub fn main() !void {
 
         var lexer = lex.Lexer.init(contents, "fuzz");
         while (true) {
-            const token = lexer.next() catch |e| {
+            const token = lexer.next() catch {
                 break;
             };
             if (token.id == lex.Token.Id.eof) break;

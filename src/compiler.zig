@@ -52,7 +52,10 @@ pub const Compiler = struct {
 
     pub const Error = error{CompileError} || Allocator.Error;
 
-    pub fn deinit(self: *Compiler) void {}
+    pub fn deinit(self: *Compiler) void {
+        // TODO
+        _ = self;
+    }
 
     /// State for an incomplete/to-be-compiled function
     /// Analogous to FuncState in PUC Lua
@@ -360,7 +363,7 @@ pub const Compiler = struct {
 
         pub fn getlocvar(self: *Func, active_local_var_index: usize) *LocalVar {
             const local_var_index = self.active_local_vars[active_local_var_index];
-            return &self.local_vars.items[active_local_var_index];
+            return &self.local_vars.items[local_var_index];
         }
 
         /// searchvar equivalent
@@ -593,6 +596,7 @@ pub const Compiler = struct {
         }
 
         pub fn constfolding(self: *Func, op: OpCode, e1: *ExpDesc, e2: ?*ExpDesc) !bool {
+            _ = self; // TODO: is there a better way to avoid this unused param error?
             // can only fold number literals
             if (e2 == null and !e1.isnumeral()) return false;
             if (e2 != null and (!e1.isnumeral() or !e2.?.isnumeral())) return false;
@@ -1107,7 +1111,7 @@ fn getLuacDump(allocator: *Allocator, source: []const u8) ![]const u8 {
                 return error.ExitCodeFailure;
             }
         },
-        .Signal, .Stopped, .Unknown => |code| {
+        .Signal, .Stopped, .Unknown => {
             return error.ProcessTerminated;
         },
     }

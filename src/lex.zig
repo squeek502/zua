@@ -228,7 +228,7 @@ pub const LexErrorContext = struct {
     // TODO this is kinda weird, doesn't seem like it needs to be stored (maybe passed to render instead?)
     err: LexError,
 
-    pub fn renderAlloc(self: *LexErrorContext, allocator: *Allocator, lexer: *Lexer) ![]const u8 {
+    pub fn renderAlloc(self: *LexErrorContext, allocator: Allocator, lexer: *Lexer) ![]const u8 {
         var buffer = std.ArrayList(u8).init(allocator);
         errdefer buffer.deinit();
 
@@ -298,7 +298,7 @@ pub const Lexer = struct {
     }
 
     pub fn dump(self: *Self, token: *const Token) void {
-        std.debug.warn("{s} {s}:{d}: \"{s}\"\n", .{ @tagName(token.id), token.nameForDisplay(), token.line_number, std.fmt.fmtSliceEscapeLower(self.buffer[token.start..token.end]) });
+        std.debug.print("{s} {s}:{d}: \"{s}\"\n", .{ @tagName(token.id), token.nameForDisplay(), token.line_number, std.fmt.fmtSliceEscapeLower(self.buffer[token.start..token.end]) });
     }
 
     const State = enum {
@@ -330,9 +330,9 @@ pub const Lexer = struct {
         const start_index = self.index;
         if (veryVerboseLexing) {
             if (self.index < self.buffer.len) {
-                std.debug.warn("{d}:'{c}'", .{ self.index, self.buffer[self.index] });
+                std.debug.print("{d}:'{c}'", .{ self.index, self.buffer[self.index] });
             } else {
-                std.debug.warn("eof", .{});
+                std.debug.print("eof", .{});
             }
         }
         var result = Token{
@@ -356,7 +356,7 @@ pub const Lexer = struct {
         var number_is_null_terminated: bool = false;
         while (self.index < self.buffer.len) : (self.index += 1) {
             const c = self.buffer[self.index];
-            if (veryVerboseLexing) std.debug.warn(":{s}", .{@tagName(state)});
+            if (veryVerboseLexing) std.debug.print(":{s}", .{@tagName(state)});
             // Check for tokens that are over the size limit here as a catch-all
             if (self.index - result.start >= self.max_lexical_element_size) {
                 return self.reportLexError(LexError.LexicalElementTooLong, result, Token.Id.eof);
@@ -822,9 +822,9 @@ pub const Lexer = struct {
 
         if (veryVerboseLexing) {
             if (self.index < self.buffer.len) {
-                std.debug.warn(":{d}:'{c}'=\"{s}\"\n", .{ self.index, self.buffer[self.index], self.buffer[result.start..self.index] });
+                std.debug.print(":{d}:'{c}'=\"{s}\"\n", .{ self.index, self.buffer[self.index], self.buffer[result.start..self.index] });
             } else {
-                std.debug.warn(":eof=\"{s}\"\n", .{self.buffer[result.start..self.index]});
+                std.debug.print(":eof=\"{s}\"\n", .{self.buffer[result.start..self.index]});
             }
         }
 
@@ -867,7 +867,7 @@ pub const Lexer = struct {
         return self.reportLexError(err, unfinished_token, id);
     }
 
-    pub fn renderErrorAlloc(self: *Self, allocator: *Allocator) ![]const u8 {
+    pub fn renderErrorAlloc(self: *Self, allocator: Allocator) ![]const u8 {
         if (self.error_context) |*ctx| {
             return ctx.renderAlloc(allocator, self);
         } else {
@@ -1175,9 +1175,9 @@ test "5.1 check_next bug compat off" {
 }
 
 fn expectLexError(expected: LexError, actual: anytype) !void {
-    if (veryVerboseLexing) std.debug.warn("\n", .{});
+    if (veryVerboseLexing) std.debug.print("\n", .{});
     try std.testing.expectError(expected, actual);
-    if (dumpTokensDuringTests) std.debug.warn("{}\n", .{actual});
+    if (dumpTokensDuringTests) std.debug.print("{}\n", .{actual});
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {
@@ -1198,7 +1198,7 @@ fn testLexNoCheckNextBugCompat(source: []const u8, expected_tokens: []const Toke
 }
 
 fn testLexInitialized(lexer: *Lexer, expected_tokens: []const Token.Id) !void {
-    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{s}\n----------------------\n", .{lexer.buffer});
+    if (dumpTokensDuringTests) std.debug.print("\n----------------------\n{s}\n----------------------\n", .{lexer.buffer});
     for (expected_tokens) |expected_token_id| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);
@@ -1248,7 +1248,7 @@ const TokenAndLineNumber = struct {
 
 fn testLexLineNumbers(source: []const u8, expected_tokens: []const TokenAndLineNumber) !void {
     var lexer = Lexer.init(source, source);
-    if (dumpTokensDuringTests) std.debug.warn("\n----------------------\n{s}\n----------------------\n", .{lexer.buffer});
+    if (dumpTokensDuringTests) std.debug.print("\n----------------------\n{s}\n----------------------\n", .{lexer.buffer});
     for (expected_tokens) |expected_token| {
         const token = try lexer.next();
         if (dumpTokensDuringTests) lexer.dump(&token);

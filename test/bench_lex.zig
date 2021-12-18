@@ -15,14 +15,14 @@ const inputs_dir_path = build_options.fuzzed_lex_inputs_dir;
 test "bench fuzz_llex inputs" {
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_allocator.deinit();
-    var allocator = &arena_allocator.allocator;
+    var allocator = arena_allocator.allocator();
 
     timer = try Timer.start();
 
     var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
     defer inputs_dir.close();
 
-    std.debug.warn("Mode: {}\n", .{@import("builtin").mode});
+    std.debug.print("Mode: {}\n", .{@import("builtin").mode});
     var n: usize = 0;
     var time: u64 = 0;
     const num_iterations = 1000;
@@ -49,7 +49,7 @@ test "bench fuzz_llex inputs" {
         time += endMeasure(num_iterations);
         n += 1;
     }
-    std.debug.warn("Lexed {} files in {}ns ({d}ms)\n", .{ n, time, @intToFloat(f64, time) / (std.time.ns_per_s / std.time.ms_per_s) });
+    std.debug.print("Lexed {} files in {}ns ({d}ms)\n", .{ n, time, @intToFloat(f64, time) / (std.time.ns_per_s / std.time.ms_per_s) });
 }
 
 fn beginMeasure() void {

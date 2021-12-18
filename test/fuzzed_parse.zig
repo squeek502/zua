@@ -36,7 +36,7 @@ test "fuzzed_parse input/output pairs" {
         if (entry.kind != .File) continue;
 
         if (verboseTestPrinting) {
-            std.debug.warn("\n{s}\n", .{entry.name});
+            std.debug.print("\n{s}\n", .{entry.name});
         }
 
         const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
@@ -117,7 +117,7 @@ test "fuzzed_parse input/output pairs" {
 
         n += 1;
     }
-    std.debug.warn(
+    std.debug.print(
         "\n{} input/output pairs tested: {} passed, {} skipped (skipped {} bytecode outputs, {} unimplemented errors)\n",
         .{ n + nskipped + nbytecode, n, nskipped + nbytecode, nbytecode, nskipped },
     );

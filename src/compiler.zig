@@ -14,7 +14,7 @@ const Token = zua.lex.Token;
 /// LUAI_MAXVARS from lconf.h
 pub const max_vars = 200;
 
-pub fn compile(allocator: *Allocator, source: []const u8) !Function {
+pub fn compile(allocator: Allocator, source: []const u8) !Function {
     var lexer = Lexer.init(source, source);
     var parser = Parser.init(&lexer);
     var tree = try parser.parse(allocator);
@@ -22,7 +22,7 @@ pub fn compile(allocator: *Allocator, source: []const u8) !Function {
 
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
     defer arena_allocator.deinit();
-    const arena = &arena_allocator.allocator;
+    const arena = arena_allocator.allocator();
 
     var compiler = Compiler{
         .source = source,
@@ -46,8 +46,8 @@ pub fn compile(allocator: *Allocator, source: []const u8) !Function {
 
 pub const Compiler = struct {
     source: []const u8,
-    arena: *Allocator,
-    allocator: *Allocator,
+    arena: Allocator,
+    allocator: Allocator,
     func: *Func,
 
     pub const Error = error{CompileError} || Allocator.Error;
@@ -1078,7 +1078,7 @@ pub const Compiler = struct {
     }
 };
 
-fn getLuacDump(allocator: *Allocator, source: []const u8) ![]const u8 {
+fn getLuacDump(allocator: Allocator, source: []const u8) ![]const u8 {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 

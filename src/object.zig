@@ -81,7 +81,7 @@ pub const Function = struct {
     max_stack_size: u8,
     num_params: u8 = 0,
     num_upvalues: u8 = 0,
-    allocator: ?*Allocator = null,
+    allocator: ?Allocator = null,
 
     pub const VarArgs = struct {
         has_arg: bool = false,
@@ -217,7 +217,7 @@ pub const Constant = union(Constant.Type) {
         }
     };
 
-    pub const Map = std.HashMap(Constant, usize, Constant.HashContext, std.hash_map.DefaultMaxLoadPercentage);
+    pub const Map = std.HashMap(Constant, usize, Constant.HashContext, std.hash_map.default_max_load_percentage);
 };
 
 /// Turns a 'source' string into a chunk id for display in errors, etc.

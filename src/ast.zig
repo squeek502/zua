@@ -9,7 +9,7 @@ pub const Tree = struct {
     source: []const u8,
 
     arena: std.heap.ArenaAllocator.State,
-    allocator: *Allocator,
+    allocator: Allocator,
 
     pub fn deinit(self: *Tree) void {
         self.arena.promote(self.allocator).deinit();

@@ -35,7 +35,7 @@ test "fuzz_llex input/output pairs" {
         if (entry.kind != .File) continue;
 
         if (verboseTestPrinting) {
-            std.debug.warn("\n{s}\n", .{entry.name});
+            std.debug.print("\n{s}\n", .{entry.name});
         }
 
         const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
@@ -55,7 +55,7 @@ test "fuzz_llex input/output pairs" {
         while (true) {
             const token = lexer.next() catch |e| {
                 if (verboseTestPrinting) {
-                    std.debug.warn("\n{s}\n", .{e});
+                    std.debug.print("\n{s}\n", .{e});
                 }
                 try result_writer.writeByte('\n');
                 const err_msg = try lexer.renderErrorAlloc(allocator);
@@ -65,9 +65,9 @@ test "fuzz_llex input/output pairs" {
             };
             if (verboseTestPrinting) {
                 if (printTokenBounds) {
-                    std.debug.warn("{d}:{s}:{d}", .{ token.start, token.nameForDisplay(), token.end });
+                    std.debug.print("{d}:{s}:{d}", .{ token.start, token.nameForDisplay(), token.end });
                 } else {
-                    std.debug.warn("{s}", .{token.nameForDisplay()});
+                    std.debug.print("{s}", .{token.nameForDisplay()});
                 }
             }
             try result_writer.writeAll(token.nameForDisplay());
@@ -75,13 +75,13 @@ test "fuzz_llex input/output pairs" {
                 break;
             } else {
                 if (verboseTestPrinting) {
-                    std.debug.warn(" ", .{});
+                    std.debug.print(" ", .{});
                 }
                 try result_writer.print(" ", .{});
             }
         }
         if (verboseTestPrinting) {
-            std.debug.warn("\nexpected\n{s}\n", .{expectedContents});
+            std.debug.print("\nexpected\n{s}\n", .{expectedContents});
         }
         var nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
         if (nearIndex) |i| {
@@ -99,5 +99,5 @@ test "fuzz_llex input/output pairs" {
         }
         n += 1;
     }
-    std.debug.warn("\n{d} input/output pairs checked\n", .{n});
+    std.debug.print("\n{d} input/output pairs checked\n", .{n});
 }

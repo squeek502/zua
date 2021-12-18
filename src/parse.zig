@@ -68,7 +68,7 @@ pub const ParseErrorContext = struct {
     // TODO this is kinda weird, doesn't seem like it needs to be stored (maybe passed to render instead?)
     err: ParseError,
 
-    pub fn renderAlloc(self: *ParseErrorContext, allocator: *Allocator, parser: *Parser) ![]const u8 {
+    pub fn renderAlloc(self: *ParseErrorContext, allocator: Allocator, parser: *Parser) ![]const u8 {
         var buffer = std.ArrayList(u8).init(allocator);
         errdefer buffer.deinit();
 
@@ -120,21 +120,21 @@ pub const Parser = struct {
 
     pub const State = struct {
         token: Token,
-        allocator: *Allocator,
-        arena: *Allocator,
+        allocator: Allocator,
+        arena: Allocator,
         in_loop: bool = false,
         in_vararg_func: bool = true, // main chunk is always vararg
         syntax_level: usize = 0,
     };
 
-    pub fn parse(self: *Self, allocator: *Allocator) Error!*Tree {
+    pub fn parse(self: *Self, allocator: Allocator) Error!*Tree {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
         self.state = Parser.State{
             .token = try self.lexer.next(),
             .allocator = allocator,
-            .arena = &arena.allocator,
+            .arena = arena.allocator(),
         };
 
         const parsed_chunk = try self.chunk();
@@ -1141,7 +1141,7 @@ pub const Parser = struct {
         return err;
     }
 
-    pub fn renderErrorAlloc(self: *Self, allocator: *Allocator) ![]const u8 {
+    pub fn renderErrorAlloc(self: *Self, allocator: Allocator) ![]const u8 {
         if (self.error_context) |*ctx| {
             return ctx.renderAlloc(allocator, self);
         } else {

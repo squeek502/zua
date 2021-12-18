@@ -48,9 +48,9 @@ pub fn main() !void {
 
             n += 1;
             if (n % 100 == 0) {
-                std.debug.warn("{}...\r", .{n});
+                std.debug.print("{}...\r", .{n});
             }
         }
     }
-    std.debug.warn("{} files written to '{s}'\n", .{ n, outputs_dir_path });
+    std.debug.print("{} files written to '{s}'\n", .{ n, outputs_dir_path });
 }

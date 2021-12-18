@@ -27,7 +27,7 @@ const assert = std.debug.assert;
 pub const Table = struct {
     array: ArrayPortion,
     map: MapPortion.HashMap,
-    allocator: *Allocator,
+    allocator: Allocator,
 
     const ArrayPortion = std.ArrayList(Value);
     const MapPortion = struct {
@@ -80,12 +80,12 @@ pub const Table = struct {
         };
     };
 
-    pub fn init(allocator: *Allocator) Table {
+    pub fn init(allocator: Allocator) Table {
         // no initial capacity removes the chance of failure
         return initCapacity(allocator, 0, 0) catch unreachable;
     }
 
-    pub fn initCapacity(allocator: *Allocator, narray: usize, nhash: usize) !Table {
+    pub fn initCapacity(allocator: Allocator, narray: usize, nhash: usize) !Table {
         var self = Table{
             .array = ArrayPortion.init(allocator),
             .map = MapPortion.HashMap.init(allocator),
@@ -98,7 +98,7 @@ pub const Table = struct {
             try self.array.appendNTimes(Value.nil, narray);
         }
         if (nhash > 0) {
-            try self.map.ensureCapacity(nhash);
+            try self.map.ensureTotalCapacity(nhash);
         }
         return self;
     }

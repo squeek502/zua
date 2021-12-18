@@ -33,7 +33,7 @@ test "string input/output pairs" {
         if (entry.kind != .File) continue;
 
         if (verboseTestPrinting) {
-            std.debug.warn("\n{s}\n", .{entry.name});
+            std.debug.print("\n{s}\n", .{entry.name});
         }
         const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(contents);
@@ -54,12 +54,12 @@ test "string input/output pairs" {
             defer allocator.free(buf);
             const parsed = parseString(string_source, buf);
             if (verboseTestPrinting) {
-                std.debug.warn("got\n{x}\n", .{parsed});
-                std.debug.warn("expected\n{x}\n", .{expectedContents});
+                std.debug.print("got\n{x}\n", .{parsed});
+                std.debug.print("expected\n{x}\n", .{expectedContents});
             }
             try std.testing.expectEqualSlices(u8, expectedContents, parsed);
         }
         n += 1;
     }
-    std.debug.warn("\n{} input/output pairs checked...\n", .{n});
+    std.debug.print("\n{} input/output pairs checked...\n", .{n});
 }

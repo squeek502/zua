@@ -36,7 +36,7 @@ pub const Table = struct {
         pub const KeyContext = struct {
             // TODO: This is woefully underimplemented
             pub fn hash(self: @This(), key: Value) u32 {
-                _ = self; // TODO: is there a better way to avoid unused param error?
+                _ = self;
                 switch (key) {
                     .boolean => |val| {
                         const autoHashFn = std.array_hash_map.getAutoHashFn(@TypeOf(val), void);
@@ -67,15 +67,15 @@ pub const Table = struct {
                 }
             }
 
-            pub fn eql(self: @This(), a: Value, b: Value) bool {
-                _ = self; // TODO: is there a better way to avoid unused param error?
+            pub fn eql(self: @This(), a: Value, b: Value, b_index: usize) bool {
+                _ = self;
                 if (a.getType() != b.getType()) {
                     return false;
                 }
 
                 // TODO: type-specific eql
                 const autoEqlFn = std.array_hash_map.getAutoEqlFn(Value, void);
-                return autoEqlFn({}, a, b);
+                return autoEqlFn({}, a, b, b_index);
             }
         };
     };

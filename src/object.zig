@@ -11,7 +11,7 @@ pub const Value = union(Value.Type) {
     none: void,
     nil: void,
     boolean: bool,
-    light_userdata: *c_void, // TODO: what type should this be?
+    light_userdata: *anyopaque, // TODO: what type should this be?
     number: f64,
     string: *GCObject,
     table: *GCObject,
@@ -182,7 +182,7 @@ pub const Constant = union(Constant.Type) {
 
     pub const HashContext = struct {
         pub fn hash(self: @This(), constant: Constant) u64 {
-            _ = self; // TODO: is there a better way to avoid unused param error?
+            _ = self;
             switch (constant) {
                 .boolean => |val| {
                     const autoHashFn = std.hash_map.getAutoHashFn(@TypeOf(val), void);
@@ -204,7 +204,7 @@ pub const Constant = union(Constant.Type) {
         }
 
         pub fn eql(self: @This(), a: Constant, b: Constant) bool {
-            _ = self; // TODO: is there a better way to avoid unused param error?
+            _ = self;
             if (@as(Constant.Type, a) != @as(Constant.Type, b)) {
                 return false;
             }

@@ -596,7 +596,7 @@ pub const Compiler = struct {
         }
 
         pub fn constfolding(self: *Func, op: OpCode, e1: *ExpDesc, e2: ?*ExpDesc) !bool {
-            _ = self; // TODO: is there a better way to avoid this unused param error?
+            _ = self;
             // can only fold number literals
             if (e2 == null and !e1.isnumeral()) return false;
             if (e2 != null and (!e1.isnumeral() or !e2.?.isnumeral())) return false;

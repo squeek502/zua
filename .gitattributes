@@ -1,3 +1,4 @@
 *.zig text eol=lf
 test/corpus/** -text
 test/output/** -text
+lua-5.1/** linguist-vendored

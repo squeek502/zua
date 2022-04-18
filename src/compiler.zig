@@ -1078,48 +1078,7 @@ pub const Compiler = struct {
     }
 };
 
-fn getLuacDump(allocator: Allocator, source: []const u8) ![]const u8 {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    const child = try std.ChildProcess.init(&[_][]const u8{
-        "luac",
-        "-s",
-        "-",
-    }, allocator);
-    defer child.deinit();
-
-    child.stdin_behavior = .Pipe;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-    child.cwd = &tmp.sub_path;
-    child.cwd_dir = tmp.dir;
-
-    try child.spawn();
-
-    try child.stdin.?.writer().writeAll(source);
-
-    // close stdin and mark it as closed
-    // TODO is there a more intended way to signal stdin EOF?
-    child.stdin.?.close();
-    child.stdin = null;
-
-    const term = try child.wait();
-    switch (term) {
-        .Exited => |code| {
-            if (code != 0) {
-                return error.ExitCodeFailure;
-            }
-        },
-        .Signal, .Stopped, .Unknown => {
-            return error.ProcessTerminated;
-        },
-    }
-
-    return tmp.dir.readFileAlloc(allocator, "luac.out", std.math.maxInt(usize));
-}
-
-fn testCompile(source: []const u8) !void {
+fn testCompile(source: [:0]const u8) !void {
     var chunk = try compile(std.testing.allocator, source);
     defer chunk.deinit();
 
@@ -1129,7 +1088,7 @@ fn testCompile(source: []const u8) !void {
     defer buf.deinit();
     try zua.dump.write(chunk, buf.writer());
 
-    const luacDump = try getLuacDump(std.testing.allocator, source);
+    const luacDump = try @import("zuatest").luac.loadAndDumpAlloc(std.testing.allocator, source);
     defer std.testing.allocator.free(luacDump);
 
     //std.debug.print("\n", .{});

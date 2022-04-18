@@ -3,9 +3,11 @@ const Builder = std.build.Builder;
 
 pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
+    const target = b.standardTargetOptions(.{});
 
     const exe = b.addExecutable("zua", "src/zua.zig");
     exe.setBuildMode(mode);
+    exe.setTarget(target);
     exe.install();
 
     const run_cmd = exe.run();
@@ -14,10 +16,24 @@ pub fn build(b: *Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    var lualib = addLuaLibrary(b, mode, target);
+
     var tests = b.addTest("src/zua.zig");
     tests.setBuildMode(mode);
+    tests.setTarget(target);
+    tests.linkLibrary(lualib);
+    tests.addIncludePath("lua-5.1/src");
+    tests.addPackagePath("zuatest", "test/lib.zig");
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&tests.step);
+
+    var testlib_test = b.addTest("test/lib.zig");
+    testlib_test.setBuildMode(mode);
+    testlib_test.setTarget(target);
+    testlib_test.linkLibrary(lualib);
+    testlib_test.addIncludePath("lua-5.1/src");
+    const testlib_test_step = b.step("testlib", "Run test library tests");
+    testlib_test_step.dependOn(&testlib_test.step);
 
     const fuzzed_lex_inputs_dir_default = "test/corpus/fuzz_llex";
     const fuzzed_lex_outputs_dir_default = "test/output/fuzz_llex";
@@ -94,4 +110,45 @@ pub fn build(b: *Builder) void {
     fuzzed_parse_prune.addPackagePath("zua", "src/zua.zig");
     const fuzzed_parse_prune_step = b.step("fuzzed_parse_prune", "Prune fuzzed parser corpus to remove lexer-specific error outputs");
     fuzzed_parse_prune_step.dependOn(&fuzzed_parse_prune.run().step);
+}
+
+fn addLuaLibrary(b: *Builder, mode: std.builtin.Mode, target: std.zig.CrossTarget) *std.build.LibExeObjStep {
+    var lualib = b.addStaticLibrary("lua", null);
+    lualib.linkLibC();
+    lualib.setBuildMode(mode);
+    lualib.setTarget(target);
+    lualib.addIncludePath("lua-5.1/src");
+    lualib.addCSourceFiles(&.{
+        "lua-5.1/src/lapi.c",
+        "lua-5.1/src/lcode.c",
+        "lua-5.1/src/ldebug.c",
+        "lua-5.1/src/ldo.c",
+        "lua-5.1/src/ldump.c",
+        "lua-5.1/src/lfunc.c",
+        "lua-5.1/src/lgc.c",
+        "lua-5.1/src/llex.c",
+        "lua-5.1/src/lmem.c",
+        "lua-5.1/src/lobject.c",
+        "lua-5.1/src/lopcodes.c",
+        "lua-5.1/src/lparser.c",
+        "lua-5.1/src/lstate.c",
+        "lua-5.1/src/lstring.c",
+        "lua-5.1/src/ltable.c",
+        "lua-5.1/src/ltm.c",
+        "lua-5.1/src/lundump.c",
+        "lua-5.1/src/lvm.c",
+        "lua-5.1/src/lzio.c",
+        "lua-5.1/src/lauxlib.c",
+        "lua-5.1/src/lbaselib.c",
+        "lua-5.1/src/ldblib.c",
+        "lua-5.1/src/liolib.c",
+        "lua-5.1/src/lmathlib.c",
+        "lua-5.1/src/loslib.c",
+        "lua-5.1/src/ltablib.c",
+        "lua-5.1/src/lstrlib.c",
+        "lua-5.1/src/loadlib.c",
+        "lua-5.1/src/linit.c",
+    }, &.{"-std=gnu99"});
+
+    return lualib;
 }

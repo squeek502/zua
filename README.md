@@ -25,7 +25,9 @@ Goals, in order of priority:
 - [ ] Number parsing (in Lua this was done at lex-time) -> [parse_literal.zig](src/parse_literal.zig)
   + [x] Basic number parsing
   + [ ] Proper `strtod`-compatible number parsing implementation
-- [ ] Parser (lparser.c/.h) -> [parse.zig](src/parse.zig)
+- [ ] Parser (lparser.c/.h) (in Lua this was done as one step with no AST intermediate)
+  + [x] Parsing tokens into an AST -> ([parse.zig](src/parse.zig)) (mostly done, needs some more testing/cleanup)
+  + [ ] Compiling the AST into bytecode -> ([compiler.zig](src/compiler.zig))
 - [ ] ...
 
 ## Why Lua 5.1?

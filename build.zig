@@ -110,6 +110,20 @@ pub fn build(b: *Builder) void {
     fuzzed_parse_prune.addPackagePath("zua", "src/zua.zig");
     const fuzzed_parse_prune_step = b.step("fuzzed_parse_prune", "Prune fuzzed parser corpus to remove lexer-specific error outputs");
     fuzzed_parse_prune_step.dependOn(&fuzzed_parse_prune.run().step);
+
+    const lua51_tests_inputs_dir_default = "lua-5.1/test";
+    const lua51_tests_inputs_dir = b.option([]const u8, "lua51_tests_inputs_dir", "Directory with the PUC Lua test files") orelse lua51_tests_inputs_dir_default;
+
+    const lua51_tests_options = b.addOptions();
+    lua51_tests_options.addOption([]const u8, "lua51_tests_inputs_dir", lua51_tests_inputs_dir);
+
+    var lua51_tests = b.addTest("test/lua51_tests.zig");
+    lua51_tests.setBuildMode(mode);
+    lua51_tests.setTarget(target);
+    lua51_tests.addOptions("build_options", lua51_tests_options);
+    lua51_tests.addPackagePath("zua", "src/zua.zig");
+    const lua51_tests_step = b.step("lua51_tests", "Run tests using the Lua 5.1 test files");
+    lua51_tests_step.dependOn(&lua51_tests.step);
 }
 
 fn addLuaLibrary(b: *Builder, mode: std.builtin.Mode, target: std.zig.CrossTarget) *std.build.LibExeObjStep {

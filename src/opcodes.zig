@@ -38,6 +38,7 @@ pub const OpCode = enum(u6) {
     mod = 16,
     pow = 17,
     unm = 18,
+    not = 19,
     len = 20,
     concat = 21,
     call = 28,
@@ -60,6 +61,7 @@ pub const OpCode = enum(u6) {
             .self => Instruction.Self,
             .add, .sub, .mul, .div, .mod, .pow => Instruction.BinaryMath,
             .unm => Instruction.UnaryMinus,
+            .not => Instruction.Not,
             .len => Instruction.Length,
             .concat => Instruction.Concat,
             .call, .tailcall => Instruction.Call,
@@ -436,6 +438,29 @@ pub const Instruction = packed struct {
             .test_a_mode = true,
             .test_t_mode = false,
         };
+    };
+
+    pub const Not = packed struct {
+        instruction: Instruction.ABC,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .RegisterOrJumpOffset,
+            .c_mode = .NotUsed,
+            .test_a_mode = true,
+            .test_t_mode = false,
+        };
+
+        // TODO: What are A / C used for / do they need to be able to be set here
+        pub fn init(reg: u9) Not {
+            return .{
+                .instruction = Instruction.ABC.init(
+                    .not,
+                    0,
+                    reg,
+                    0,
+                ),
+            };
+        }
     };
 
     pub const Length = packed struct {

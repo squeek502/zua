@@ -234,6 +234,14 @@ pub const Compiler = struct {
             e.desc = .{ .nonreloc = .{ .result_register = reg } };
         }
 
+        pub fn discharge2anyreg(self: *Func, e: *ExpDesc) !void {
+            if (e.desc != .nonreloc) {
+                try self.reserveregs(1);
+                const reg = self.free_register - 1;
+                try self.discharge2reg(e, reg);
+            }
+        }
+
         /// luaK_ret equivalent
         pub fn emitReturn(self: *Func, first_return_reg: u8, num_returns: ?u9) !usize {
             return self.emitInstruction(Instruction.Return.init(first_return_reg, num_returns));
@@ -490,7 +498,13 @@ pub const Compiler = struct {
                     e.desc = .{ .@"false" = {} };
                 },
                 .jmp => @panic("TODO"),
-                .relocable, .nonreloc => @panic("TODO"),
+                .relocable, .nonreloc => {
+                    try self.discharge2anyreg(e);
+                    try self.freeexp(e);
+                    const result_register = e.desc.nonreloc.result_register;
+                    const instruction_index = try self.emitInstruction(Instruction.Not.init(result_register));
+                    e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
+                },
                 else => unreachable,
             }
             if (e.patch_list != null) {
@@ -1208,6 +1222,7 @@ test "not operator" {
     try testCompile("return not 1");
     try testCompile("return not 0");
     try testCompile("return not ''");
+    try testCompile("return not a");
 }
 
 test "concat operator" {

@@ -148,12 +148,12 @@ pub const Compiler = struct {
 
         pub fn setoneret(self: *Func, e: *ExpDesc) !void {
             if (e.desc == .call) {
-                const instruction = self.getcode(e);
-                e.desc = .{ .nonreloc = .{ .result_register = instruction.a } };
+                const instruction = @ptrCast(*Instruction.Call, self.getcode(e));
+                e.desc = .{ .nonreloc = .{ .result_register = instruction.getBaseReg() } };
             } else if (e.desc == .vararg) {
-                const instruction = self.getcode(e);
-                const instructionABC = @ptrCast(*Instruction.ABC, instruction);
-                instructionABC.*.b = 2;
+                const instruction = @ptrCast(*Instruction.VarArg, self.getcode(e));
+                instruction.setNumReturnValues(1);
+
                 const instruction_index = e.desc.vararg.instruction_index;
                 e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
             }
@@ -947,9 +947,9 @@ pub const Compiler = struct {
                 try self.func.setmultret(&self.func.cur_exp);
                 // tail call?
                 if (self.func.cur_exp.desc == .call and num_return_values.? == 1) {
-                    const instruction = self.func.getcode(&self.func.cur_exp);
-                    instruction.op = .tailcall;
-                    std.debug.assert(instruction.a == self.func.num_active_local_vars);
+                    const instruction = @ptrCast(*Instruction.Call, self.func.getcode(&self.func.cur_exp));
+                    instruction.instruction.op = .tailcall;
+                    std.debug.assert(instruction.getBaseReg() == self.func.num_active_local_vars);
                 }
                 first_return_reg = self.func.num_active_local_vars;
                 num_return_values = null;

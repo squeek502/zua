@@ -496,16 +496,26 @@ pub const Instruction = packed struct {
             .test_t_mode = false,
         };
 
-        pub fn init(base: u8, num_params: u9, num_return_values: ?u9) Call {
+        pub fn init(base_reg: u8, num_params: u9, num_return_values: ?u9) Call {
             const c_val = if (num_return_values != null) num_return_values.? + 1 else 0;
             return .{
                 .instruction = Instruction.ABC.init(
                     .call,
-                    base,
+                    base_reg,
                     num_params + 1,
                     c_val,
                 ),
             };
+        }
+
+        // TODO: Better name than 'base register'?
+        // 'base register for call' is what it's called in lparser.c:643
+        pub fn setBaseReg(self: *Call, base_reg: u8) void {
+            self.instruction.a = base_reg;
+        }
+
+        pub fn getBaseReg(self: *Call) u8 {
+            return self.instruction.a;
         }
 
         pub fn setNumReturnValues(self: *Call, num_return_values: ?u9) void {

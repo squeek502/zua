@@ -130,7 +130,7 @@ pub const Compiler = struct {
                     @panic("TODO");
                 },
                 .global => {
-                    const index = try self.emitABx(.getglobal, 0, @intCast(u18, e.desc.global.name_constant_index));
+                    const index = try self.emitABx(.getglobal, 0, e.desc.global.name_constant_index);
                     e.desc = .{ .relocable = .{ .instruction_index = index } };
                 },
                 .indexed => {
@@ -286,14 +286,21 @@ pub const Compiler = struct {
             return self.emitInstruction(Instruction.ABx.init(op, a, bx));
         }
 
-        pub fn putConstant(self: *Func, constant: Constant) Error!usize {
+        pub fn putConstant(self: *Func, constant: Constant) Error!u18 {
             const result = try self.constants_map.getOrPut(constant);
             if (result.found_existing) {
-                return result.value_ptr.*;
+                return @intCast(u18, result.value_ptr.*);
             } else {
-                result.value_ptr.* = self.constants.items.len;
+                const index = self.constants.items.len;
+                result.value_ptr.* = index;
                 try self.constants.append(constant);
-                return result.value_ptr.*;
+
+                if (index > Instruction.ABx.max_bx) {
+                    // TODO: "constant table overflow"
+                    return error.CompileError;
+                }
+
+                return @intCast(u18, index);
             }
         }
 
@@ -654,12 +661,12 @@ pub const Compiler = struct {
             nil: void,
             @"true": void,
             @"false": void,
-            constant_index: usize,
+            constant_index: u18,
             number: f64,
             local_register: u8,
             upvalue_index: usize,
             global: struct {
-                name_constant_index: usize,
+                name_constant_index: u18,
             },
             indexed: struct {
                 table_register: u8,
@@ -1080,7 +1087,7 @@ pub const Compiler = struct {
         self.func.cur_exp = table_exp;
     }
 
-    pub fn putConstant(self: *Compiler, constant: Constant) Error!usize {
+    pub fn putConstant(self: *Compiler, constant: Constant) Error!u18 {
         var final_constant = constant;
         if (constant == .string and !self.func.constants_map.contains(constant)) {
             // dupe the string so that the resulting Function owns all the memory

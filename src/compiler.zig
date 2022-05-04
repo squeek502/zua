@@ -166,7 +166,7 @@ pub const Compiler = struct {
         }
 
         pub fn freereg(self: *Func, reg: u9) void {
-            if (!zua.opcodes.isConstant(reg) and reg >= self.num_active_local_vars) {
+            if (!zua.opcodes.rkIsConstant(reg) and reg >= self.num_active_local_vars) {
                 self.free_register -= 1;
                 std.debug.assert(reg == self.free_register);
             }
@@ -411,7 +411,7 @@ pub const Compiler = struct {
             try self.exp2val(e);
             switch (e.desc) {
                 .number, .@"true", .@"false", .nil => {
-                    if (self.constants.items.len <= zua.opcodes.max_constant_index) {
+                    if (self.constants.items.len <= zua.opcodes.rk_max_constant_index) {
                         var constant: Constant = switch (e.desc) {
                             .nil => Constant{ .nil = {} },
                             .@"true", .@"false" => Constant{ .boolean = e.desc == .@"true" },
@@ -423,7 +423,7 @@ pub const Compiler = struct {
                     }
                 },
                 .constant_index => {
-                    if (e.desc.constant_index <= zua.opcodes.max_constant_index) {
+                    if (e.desc.constant_index <= zua.opcodes.rk_max_constant_index) {
                         return zua.opcodes.constantIndexToRK(@intCast(u9, e.desc.constant_index));
                     }
                 },

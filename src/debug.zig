@@ -33,9 +33,9 @@ fn checkArgMode(function: *const Function, val: i32, mode: OpCode.OpArgMask) !vo
         },
         .ConstantOrRegisterConstant => {
             const actual_size_val = @intCast(u9, val);
-            const is_constant = zua.opcodes.isConstant(actual_size_val);
+            const is_constant = zua.opcodes.rkIsConstant(actual_size_val);
             if (is_constant) {
-                if (zua.opcodes.getConstantIndex(actual_size_val) >= function.constants.len) return error.ConstantIndexOutOfRange;
+                if (zua.opcodes.rkGetConstantIndex(actual_size_val) >= function.constants.len) return error.ConstantIndexOutOfRange;
             } else {
                 try checkreg(function, actual_size_val);
             }

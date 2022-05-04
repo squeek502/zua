@@ -151,23 +151,23 @@ pub const OpCode = enum(u6) {
 /// SIZE_B define equivalent (lopcodes.h)
 const bit_size_b = 9;
 /// BITRK define equivalent (lopcodes.h)
-const bit_mask_constant: u9 = 1 << (bit_size_b - 1);
+const rk_bit_mask_constant: u9 = 1 << (bit_size_b - 1);
 /// MAXINDEXRK define equivalent (lopcodes.h)
-pub const max_constant_index: u9 = bit_mask_constant - 1;
+pub const rk_max_constant_index: u9 = rk_bit_mask_constant - 1;
 
 /// ISK macro equivalent (lopcodes.h)
-pub fn isConstant(val: u9) bool {
-    return val & bit_mask_constant != 0;
+pub fn rkIsConstant(val: u9) bool {
+    return val & rk_bit_mask_constant != 0;
 }
 
 /// INDEXK macro equivalent (lopcodes.h)
-pub fn getConstantIndex(val: u9) u9 {
-    return val & ~bit_mask_constant;
+pub fn rkGetConstantIndex(val: u9) u9 {
+    return val & ~rk_bit_mask_constant;
 }
 
 /// RKASK macro equivalent (lopcodes.h)
 pub fn constantIndexToRK(val: u9) u9 {
-    return val | bit_mask_constant;
+    return val | rk_bit_mask_constant;
 }
 
 /// To be bit-casted depending on the op field

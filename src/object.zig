@@ -136,15 +136,15 @@ pub const Function = struct {
                 .iABC => {
                     std.debug.print("{d}", .{a});
                     if (op.getBMode() != .NotUsed) {
-                        var b_for_display: i32 = if (zua.opcodes.isConstant(@intCast(u9, b)))
-                            (-1 - @intCast(i32, zua.opcodes.getConstantIndex(@intCast(u9, b))))
+                        var b_for_display: i32 = if (zua.opcodes.rkIsConstant(@intCast(u9, b)))
+                            (-1 - @intCast(i32, zua.opcodes.rkGetConstantIndex(@intCast(u9, b))))
                         else
                             b;
                         std.debug.print(" {d}", .{b_for_display});
                     }
                     if (op.getCMode() != .NotUsed) {
-                        var c_for_display: i32 = if (zua.opcodes.isConstant(@intCast(u9, c)))
-                            (-1 - @intCast(i32, zua.opcodes.getConstantIndex(@intCast(u9, c))))
+                        var c_for_display: i32 = if (zua.opcodes.rkIsConstant(@intCast(u9, c)))
+                            (-1 - @intCast(i32, zua.opcodes.rkGetConstantIndex(@intCast(u9, c))))
                         else
                             c;
                         std.debug.print(" {d}", .{c_for_display});

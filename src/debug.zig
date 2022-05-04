@@ -99,7 +99,7 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 }
             },
         }
-        if (instruction.op.testAMode()) {
+        if (instruction.op.setsRegisterInA()) {
             if (reg != null and a == reg.?) {
                 last_instruction_that_changed_reg = i;
             }
@@ -120,7 +120,8 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 }
             },
             .loadnil => {
-                if (reg != null and a <= reg.? and reg.? <= b) {
+                const loadnil_inst = @bitCast(Instruction.LoadNil, instruction);
+                if (reg != null and loadnil_inst.willAssignToRegister(@intCast(u8, reg.?))) {
                     last_instruction_that_changed_reg = i;
                 }
             },
@@ -136,7 +137,10 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 }
             },
             .concat => {
-                if (b >= c) return error.ConcatRequiresAtLeastTwoOperands;
+                const concat_inst = @bitCast(Instruction.Concat, instruction);
+                if (concat_inst.numConcattedValues() < 2) {
+                    return error.ConcatRequiresAtLeastTwoOperands;
+                }
             },
             //.tforloop => {},
             //.forloop, .forprep => {},
@@ -144,13 +148,14 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
             .call, .tailcall => {
                 const call_inst = @bitCast(Instruction.Call, instruction);
                 if (b != 0) {
-                    try checkreg(function, @intCast(usize, a + b - 1));
+                    try checkreg(function, @intCast(usize, a + call_inst.getNumParams()));
                 }
                 const num_returns = call_inst.getNumReturnValues();
                 if (call_inst.isMultipleReturns()) {
                     try checkopenop_next(function, i);
                 } else if (num_returns.? != 0) {
-                    try checkreg(function, @intCast(usize, a + num_returns.? - 1));
+                    const result_reg_end = call_inst.getResultRegEnd().?;
+                    try checkreg(function, result_reg_end);
                 }
                 if (reg != null and reg.? >= a) {
                     last_instruction_that_changed_reg = i;

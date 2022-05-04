@@ -41,6 +41,7 @@ pub const OpCode = enum(u6) {
     not = 19,
     len = 20,
     concat = 21,
+    jmp = 22,
     call = 28,
     tailcall = 29,
     @"return" = 30,
@@ -64,6 +65,7 @@ pub const OpCode = enum(u6) {
             .not => Instruction.Not,
             .len => Instruction.Length,
             .concat => Instruction.Concat,
+            .jmp => Instruction.Jump,
             .call, .tailcall => Instruction.Call,
             .@"return" => Instruction.Return,
             .setlist => Instruction.SetList,
@@ -108,7 +110,7 @@ pub const OpCode = enum(u6) {
     pub const OpMeta = struct {
         b_mode: OpArgMask,
         c_mode: OpArgMask,
-        test_a_mode: bool,
+        sets_register_in_a: bool,
         test_t_mode: bool,
     };
 
@@ -131,10 +133,9 @@ pub const OpCode = enum(u6) {
         return op_meta[@enumToInt(self)].c_mode;
     }
 
-    // TODO rename
-    /// instruction set register A
-    pub fn testAMode(self: OpCode) bool {
-        return op_meta[@enumToInt(self)].test_a_mode;
+    /// If true, the instruction will set the register index specified in its `A` value
+    pub fn setsRegisterInA(self: OpCode) bool {
+        return op_meta[@enumToInt(self)].sets_register_in_a;
     }
 
     // TODO rename
@@ -250,43 +251,57 @@ pub const Instruction = packed struct {
         }
     };
 
+    /// R(A) := R(B)
     pub const Move = packed struct {
+        /// really only A B
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
     };
 
+    /// R(A) := Kst(Bx)
     pub const LoadK = packed struct {
         instruction: Instruction.ABx,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .ConstantOrRegisterConstant,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
+
+        pub fn init(result_reg: u8, constant_index: u18) LoadK {
+            return .{
+                .instruction = Instruction.ABx.init(
+                    .loadk,
+                    result_reg,
+                    constant_index,
+                ),
+            };
+        }
     };
 
+    /// R(A) := (Bool)B; if (C) pc++
     pub const LoadBool = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .Used,
             .c_mode = .Used,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
 
-        pub fn init(reg: u8, val: bool, does_jump: bool) LoadBool {
+        pub fn init(result_reg: u8, val: bool, does_jump: bool) LoadBool {
             return .{
                 .instruction = Instruction.ABC.init(
                     .loadbool,
-                    reg,
+                    result_reg,
                     @boolToInt(val),
                     @boolToInt(does_jump),
                 ),
@@ -294,61 +309,121 @@ pub const Instruction = packed struct {
         }
 
         pub fn doesJump(self: *const LoadBool) bool {
-            return self.instruction.c == 1;
+            return self.instruction.c != 0;
         }
     };
 
+    /// R(A) := ... := R(B) := nil
     pub const LoadNil = packed struct {
+        /// really only A B
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
+
+        /// Note: reg_range_start and reg_range_end are both inclusive,
+        /// so for setting a single register start and end should
+        /// be equal
+        pub fn init(reg_range_start: u8, reg_range_end: u9) LoadNil {
+            std.debug.assert(reg_range_end >= reg_range_start);
+            return .{
+                .instruction = Instruction.ABC.init(
+                    .loadnil,
+                    reg_range_start,
+                    reg_range_end,
+                    0,
+                ),
+            };
+        }
+
+        pub fn assignsToMultipleRegisters(self: LoadNil) bool {
+            return self.instruction.a != @truncate(u8, self.instruction.b);
+        }
+
+        pub fn willAssignToRegister(self: LoadNil, reg: u8) bool {
+            return reg >= self.instruction.a and reg <= self.instruction.b;
+        }
     };
 
+    /// R(A) := Gbl[Kst(Bx)]
     pub const GetGlobal = packed struct {
         instruction: Instruction.ABx,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .ConstantOrRegisterConstant,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
+
+        pub fn init(result_reg: u8, name_constant_index: u18) GetGlobal {
+            return .{
+                .instruction = .{
+                    .op = .getglobal,
+                    .a = result_reg,
+                    .bx = name_constant_index,
+                },
+            };
+        }
     };
 
+    /// R(A) := R(B)[RK(C)]
     pub const GetTable = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .ConstantOrRegisterConstant,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
+
+        pub fn init(result_reg: u8, table_reg: u9, key_rk: u9) GetTable {
+            return .{
+                .instruction = .{
+                    .op = .gettable,
+                    .a = result_reg,
+                    .b = table_reg,
+                    .c = key_rk,
+                },
+            };
+        }
     };
 
+    /// Gbl[Kst(Bx)] := R(A)
     pub const SetGlobal = packed struct {
         instruction: Instruction.ABx,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .ConstantOrRegisterConstant,
             .c_mode = .NotUsed,
-            .test_a_mode = false,
+            .sets_register_in_a = false,
             .test_t_mode = false,
         };
+
+        pub fn init(name_constant_index: u18, source_reg: u8) SetGlobal {
+            return .{
+                .instruction = .{
+                    .op = .setglobal,
+                    .a = source_reg,
+                    .bx = name_constant_index,
+                },
+            };
+        }
     };
 
+    /// R(A)[RK(B)] := RK(C)
     pub const SetTable = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .ConstantOrRegisterConstant,
             .c_mode = .ConstantOrRegisterConstant,
-            .test_a_mode = false,
+            .sets_register_in_a = false,
             .test_t_mode = false,
         };
 
@@ -364,13 +439,14 @@ pub const Instruction = packed struct {
         }
     };
 
+    /// R(A) := {} (size = B,C)
     pub const NewTable = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .Used,
             .c_mode = .Used,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
 
@@ -383,33 +459,45 @@ pub const Instruction = packed struct {
         }
     };
 
+    /// R(A+1) := R(B); R(A) := R(B)[RK(C)]
     pub const Self = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .ConstantOrRegisterConstant,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
+
+        /// Stores the function (gotten from table[key]) in `setup_reg_start`
+        /// and the table itself in `setup_reg_start + 1`
+        pub fn init(setup_reg_start: u8, table_reg: u9, key_rk: u9) Self {
+            return .{ .instruction = .{
+                .op = .self,
+                .a = setup_reg_start,
+                .b = table_reg,
+                .c = key_rk,
+            } };
+        }
     };
 
+    /// R(A) := RK(B) <operation> RK(C)
     pub const BinaryMath = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .ConstantOrRegisterConstant,
             .c_mode = .ConstantOrRegisterConstant,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
 
-        // TODO what is `a`?
-        pub fn init(op: OpCode, a: u8, left_rk: u9, right_rk: u9) BinaryMath {
+        pub fn init(op: OpCode, result_reg: u8, left_rk: u9, right_rk: u9) BinaryMath {
             return .{
                 .instruction = Instruction.ABC.init(
                     op,
-                    a,
+                    result_reg,
                     left_rk,
                     right_rk,
                 ),
@@ -429,93 +517,197 @@ pub const Instruction = packed struct {
         }
     };
 
+    /// R(A) := -R(B)
     pub const UnaryMinus = packed struct {
+        /// really only A B
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
     };
 
+    /// R(A) := not R(B)
     pub const Not = packed struct {
+        /// really only A B
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
 
-        // TODO: What are A / C used for / do they need to be able to be set here
-        pub fn init(reg: u9) Not {
+        pub fn init(result_reg: u8, value_reg: u9) Not {
             return .{
                 .instruction = Instruction.ABC.init(
                     .not,
-                    0,
-                    reg,
+                    result_reg,
+                    value_reg,
                     0,
                 ),
             };
         }
     };
 
+    /// R(A) := length of R(B)
     pub const Length = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
     };
 
+    /// R(A) := R(B).. ... ..R(C)
     pub const Concat = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .RegisterOrJumpOffset,
             .c_mode = .RegisterOrJumpOffset,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
+
+        pub fn init(result_reg: u8, start_reg: u9, end_reg: u9) Concat {
+            std.debug.assert(end_reg > start_reg);
+            return .{ .instruction = .{
+                .op = .concat,
+                .a = result_reg,
+                .b = start_reg,
+                .c = end_reg,
+            } };
+        }
+
+        pub fn getStartReg(self: Concat) u9 {
+            return self.instruction.b;
+        }
+
+        pub fn setStartReg(self: *Concat, start_reg: u9) void {
+            self.instruction.b = start_reg;
+        }
+
+        pub fn getEndReg(self: Concat) u9 {
+            return self.instruction.c;
+        }
+
+        pub fn setEndReg(self: *Concat, end_reg: u9) void {
+            self.instruction.c = end_reg;
+        }
+
+        pub fn numConcattedValues(self: Concat) u9 {
+            return (self.instruction.c - self.instruction.b) + 1;
+        }
+    };
+
+    /// pc+=sBx
+    pub const Jump = packed struct {
+        /// really only sBx
+        instruction: Instruction.AsBx,
+
+        pub const meta: OpCode.OpMeta = .{
+            .b_mode = .RegisterOrJumpOffset,
+            .c_mode = .NotUsed,
+            .sets_register_in_a = false,
+            .test_t_mode = false,
+        };
+
+        pub fn init(offset: ?i18) Jump {
+            const instruction = Instruction.AsBx.init(.jmp, 0, 0);
+            var jmp = @bitCast(Jump, instruction);
+            jmp.setOffset(offset);
+            return jmp;
+        }
+
+        /// -1 can be used to represent 'no jump' here because that would mean that an instruction
+        /// is jumping to itself, which is obviously not something we'd ever want to do
+        const no_jump = -1;
+
+        pub fn getOffset(self: *const Jump) ?i18 {
+            const sbx = self.instruction.getSignedBx();
+            if (sbx == no_jump) return null;
+            return sbx;
+        }
+
+        pub fn setOffset(self: *Jump, offset: ?i18) void {
+            self.instruction.setSignedBx(offset orelse no_jump);
+        }
+
+        pub fn offsetToAbsolute(pc: usize, offset: i18) usize {
+            // As I understand it, the + 1 here is necessary to emulate
+            // the implicit pc++ when evaluating the jmp instruction itself.
+            // That is, if there's bytecode like:
+            //  1 jmp 1
+            //  2 something
+            //  3 something
+            // then the jmp would offset pc by 1, but then it'd get offset
+            // again by the natural movement of the pc after evaluating
+            // any instruction, so we'd actually end up at 3
+            //
+            // TODO better understand why this + 1 exists/verify the above
+            return @intCast(usize, @intCast(isize, pc + 1) + offset);
+        }
     };
 
     /// Used for both call and tailcall opcodes
+    /// call: R(A), ... ,R(A+C-2) := R(A)(R(A+1), ... ,R(A+B-1))
+    /// tailcall: return R(A)(R(A+1), ... ,R(A+B-1))
     pub const Call = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .Used,
             .c_mode = .Used,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
 
-        pub fn init(base_reg: u8, num_params: u9, num_return_values: ?u9) Call {
+        pub fn init(result_reg_start: u8, num_params: u9, num_return_values: ?u9) Call {
             const c_val = if (num_return_values != null) num_return_values.? + 1 else 0;
             return .{
                 .instruction = Instruction.ABC.init(
+                    // TODO: This is always being .call is kinda weird, but it happens to work with
+                    //       how the Lua compiler handles call/tailcall (they all start as call
+                    //       and then get converted to tailcall)
                     .call,
-                    base_reg,
+                    result_reg_start,
                     num_params + 1,
                     c_val,
                 ),
             };
         }
 
-        // TODO: Better name than 'base register'?
+        pub fn getNumParams(self: Call) u9 {
+            return self.instruction.b - 1;
+        }
+
         // 'base register for call' is what it's called in lparser.c:643
-        pub fn setBaseReg(self: *Call, base_reg: u8) void {
+        pub fn setResultRegStart(self: *Call, base_reg: u8) void {
             self.instruction.a = base_reg;
         }
 
-        pub fn getBaseReg(self: *Call) u8 {
+        pub fn getResultRegStart(self: *const Call) u8 {
             return self.instruction.a;
+        }
+
+        pub fn getResultRegEnd(self: *const Call) ?u9 {
+            if (self.getNumReturnValues()) |return_vals| {
+                if (return_vals > 0) {
+                    return self.getResultRegStart() + return_vals - 1;
+                } else {
+                    return null;
+                }
+            } else {
+                return null;
+            }
         }
 
         pub fn setNumReturnValues(self: *Call, num_return_values: ?u9) void {
@@ -536,13 +728,16 @@ pub const Instruction = packed struct {
         }
     };
 
+    /// return R(A), ... ,R(A+B-2)
+    /// if (B == 0) then return up to `top'
     pub const Return = packed struct {
+        /// really only A B
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .Used,
             .c_mode = .NotUsed,
-            .test_a_mode = false,
+            .sets_register_in_a = false,
             .test_t_mode = false,
         };
 
@@ -584,18 +779,44 @@ pub const Instruction = packed struct {
         }
     };
 
+    /// R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B
+    /// if (B == 0) then B = `top'
+    /// if (C == 0) then next `instruction' is real C
     pub const SetList = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .Used,
             .c_mode = .Used,
-            .test_a_mode = false,
+            .sets_register_in_a = false,
             .test_t_mode = false,
         };
 
-        // TODO init fn + get/setters as needed, should probably move the logic of setlist
-        // in compiler to here
+        pub const batch_num_in_next_instruction = 0;
+
+        /// Note: If the resulting SetList's c value is `batch_num_in_next_instruction`
+        /// (or `isBatchNumberStoredInNextInstruction` returns true), then this instruction
+        /// will need an additional instruction after it that contains the full batch number
+        /// (as a bare u32)
+        pub fn init(table_reg: u8, num_values: usize, to_store: ?usize) SetList {
+            const flush_batch_num: usize = SetList.numValuesToFlushBatchNum(num_values);
+            const num_values_in_batch: u9 = if (to_store == null) 0 else @intCast(u9, to_store.?);
+            const c_val = if (flush_batch_num <= Instruction.ABC.max_c)
+                @intCast(u9, flush_batch_num)
+            else
+                batch_num_in_next_instruction;
+
+            return .{ .instruction = .{
+                .op = .setlist,
+                .a = table_reg,
+                .b = num_values_in_batch,
+                .c = c_val,
+            } };
+        }
+
+        pub fn numValuesToFlushBatchNum(num_values: usize) usize {
+            return (num_values - 1) / Instruction.SetList.fields_per_flush + 1;
+        }
 
         pub fn isBatchNumberStoredInNextInstruction(self: *const SetList) bool {
             return self.instruction.c == 0;
@@ -605,13 +826,14 @@ pub const Instruction = packed struct {
         pub const fields_per_flush = 50;
     };
 
+    /// R(A), R(A+1), ..., R(A+B-1) = vararg
     pub const VarArg = packed struct {
         instruction: Instruction.ABC,
 
         pub const meta: OpCode.OpMeta = .{
             .b_mode = .Used,
             .c_mode = .NotUsed,
-            .test_a_mode = true,
+            .sets_register_in_a = true,
             .test_t_mode = false,
         };
 

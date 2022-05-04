@@ -129,14 +129,20 @@ pub const Compiler = struct {
                     e.desc = .{ .relocable = .{ .instruction_index = 0 } };
                     @panic("TODO");
                 },
-                .global => {
-                    const index = try self.emitABx(.getglobal, 0, e.desc.global.name_constant_index);
-                    e.desc = .{ .relocable = .{ .instruction_index = index } };
+                .global => |global| {
+                    const instruction_index = try self.emitInstruction(
+                        // result register is to-be-determined
+                        Instruction.GetGlobal.init(0, global.name_constant_index),
+                    );
+                    e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
                 },
-                .indexed => {
-                    self.freereg(e.desc.indexed.key_register_or_constant_index);
-                    self.freereg(e.desc.indexed.table_register);
-                    const instruction_index = try self.emitABC(.gettable, 0, e.desc.indexed.table_register, e.desc.indexed.key_register_or_constant_index);
+                .indexed => |indexed| {
+                    self.freereg(indexed.key_register_or_constant_index);
+                    self.freereg(indexed.table_register);
+                    const instruction_index = try self.emitInstruction(
+                        // result register is to-be-determined
+                        Instruction.GetTable.init(0, indexed.table_register, indexed.key_register_or_constant_index),
+                    );
                     e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
                 },
                 .vararg, .call => {
@@ -149,7 +155,7 @@ pub const Compiler = struct {
         pub fn setoneret(self: *Func, e: *ExpDesc) !void {
             if (e.desc == .call) {
                 const instruction = @ptrCast(*Instruction.Call, self.getcode(e));
-                e.desc = .{ .nonreloc = .{ .result_register = instruction.getBaseReg() } };
+                e.desc = .{ .nonreloc = .{ .result_register = instruction.getResultRegStart() } };
             } else if (e.desc == .vararg) {
                 const instruction = @ptrCast(*Instruction.VarArg, self.getcode(e));
                 instruction.setNumReturnValues(1);
@@ -193,10 +199,12 @@ pub const Compiler = struct {
                 .desc = .{
                     .nonreloc = .{ .result_register = reg },
                 },
-                .patch_list = null,
+                .patch_list = .{},
             };
         }
 
+        /// Afterwards, `e.desc` will be of type `nonreloc` unless `e.desc` starts
+        /// as `void` or `jmp`, in which case `e` will be unchanged
         pub fn discharge2reg(self: *Func, e: *ExpDesc, reg: u8) !void {
             try self.dischargevars(e);
             switch (e.desc) {
@@ -207,19 +215,20 @@ pub const Compiler = struct {
                     _ = try self.emitInstruction(Instruction.LoadBool.init(reg, e.desc == .@"true", false));
                 },
                 .constant_index => {
-                    _ = try self.emitABx(.loadk, reg, @intCast(u18, e.desc.constant_index));
+                    _ = try self.emitInstruction(Instruction.LoadK.init(reg, e.desc.constant_index));
                 },
                 .number => {
-                    // Need to add number constants to the constant table here instead of,
+                    // Need to add number constants to the constant table here instead of
                     // in genLiteral because not every constant is needed in the final
                     // bytecode, i.e. `return 1 + 2` should be resolved to only need the
                     // constant `3` (1 and 2 are not in the final bytecode)
                     const index = try self.putConstant(Constant{ .number = e.desc.number });
-                    _ = try self.emitABx(.loadk, reg, @intCast(u18, index));
+                    _ = try self.emitInstruction(Instruction.LoadK.init(reg, index));
                 },
                 .relocable => {
                     const instruction = self.getcode(e);
                     const instructionABC = @ptrCast(*Instruction.ABC, instruction);
+                    std.debug.assert(instructionABC.op.setsRegisterInA());
                     instructionABC.*.a = reg;
                 },
                 .nonreloc => {
@@ -247,18 +256,18 @@ pub const Compiler = struct {
             return self.emitInstruction(Instruction.Return.init(first_return_reg, num_returns));
         }
 
-        // TODO better param names
-        pub fn emitNil(self: *Func, from: u8, n: usize) !?usize {
+        pub fn emitNil(self: *Func, register_range_start: u8, n: usize) !?usize {
+            std.debug.assert(n >= 1);
             // TODO other branches
             if (true) { // TODO fs->pc > fs->lasttarget
                 if (self.pc() == 0) { // function start?
-                    if (from >= self.num_active_local_vars) {
+                    if (register_range_start >= self.num_active_local_vars) {
                         return null; // positions are already clean
                     }
                 }
             }
-            const b = @intCast(u9, from + n - 1);
-            if (self.emitInstruction(Instruction.ABC.init(.loadnil, from, b, 0))) |index| {
+            const register_range_end = @intCast(u9, register_range_start + n - 1);
+            if (self.emitInstruction(Instruction.LoadNil.init(register_range_start, register_range_end))) |index| {
                 return index;
             } else |err| {
                 return err;
@@ -449,14 +458,16 @@ pub const Compiler = struct {
         pub fn handleSelf(self: *Func, e: *ExpDesc, key: *ExpDesc) !void {
             _ = try self.exp2anyreg(e);
             try self.freeexp(e);
-            const func_reg = self.free_register;
+            const setup_reg_start = self.free_register;
             try self.reserveregs(2);
-            // TODO can this be a different type?
-            const result_register = e.desc.nonreloc.result_register;
+            // TODO: Is it possible for this to be something other than nonreloc?
+            const table_reg = e.desc.nonreloc.result_register;
             const key_rk = try self.exp2RK(key);
-            _ = try self.emitABC(.self, func_reg, result_register, key_rk);
+            _ = try self.emitInstruction(
+                Instruction.Self.init(setup_reg_start, table_reg, key_rk),
+            );
             try self.freeexp(key);
-            e.desc = .{ .nonreloc = .{ .result_register = func_reg } };
+            e.desc = .{ .nonreloc = .{ .result_register = setup_reg_start } };
         }
 
         pub fn storevar(self: *Func, var_e: *ExpDesc, e: *ExpDesc) !void {
@@ -469,10 +480,12 @@ pub const Compiler = struct {
                 .upvalue_index => {
                     @panic("TODO");
                 },
-                .global => {
-                    const reg = try self.exp2anyreg(e);
-                    const name_constant_index = var_e.desc.global.name_constant_index;
-                    _ = try self.emitABx(.setglobal, reg, @intCast(u18, name_constant_index));
+                .global => |global| {
+                    const source_reg = try self.exp2anyreg(e);
+                    const name_constant_index = global.name_constant_index;
+                    _ = try self.emitInstruction(
+                        Instruction.SetGlobal.init(name_constant_index, source_reg),
+                    );
                 },
                 .indexed => {
                     @panic("TODO");
@@ -483,17 +496,17 @@ pub const Compiler = struct {
         }
 
         pub fn setlist(self: *Func, base: u8, num_values: usize, to_store: ?usize) !void {
-            const flush_batch_num: usize = (num_values - 1) / Instruction.SetList.fields_per_flush + 1;
-            const num_values_in_batch: u9 = if (to_store == null) 0 else @intCast(u9, to_store.?);
-            if (flush_batch_num <= Instruction.ABC.max_c) {
-                _ = try self.emitABC(.setlist, base, num_values_in_batch, @intCast(u9, flush_batch_num));
-            } else {
-                _ = try self.emitABC(.setlist, base, num_values_in_batch, 0);
-                // if the batch number can't fit in the C field, then
-                // we use an entire 'instruction' to represent it, but the instruction
-                // is just the value itself (no opcode, etc)
+            const setlist_inst = Instruction.SetList.init(base, num_values, to_store);
+            _ = try self.emitInstruction(setlist_inst);
+
+            // if the batch number can't fit in the C field, then
+            // we use an entire 'instruction' to represent it, but the instruction
+            // is just the value itself (no opcode, etc)
+            if (setlist_inst.isBatchNumberStoredInNextInstruction()) {
+                const flush_batch_num = Instruction.SetList.numValuesToFlushBatchNum(num_values);
                 _ = try self.emitInstruction(@intCast(u32, flush_batch_num));
             }
+
             self.free_register = base + 1;
         }
 
@@ -510,13 +523,16 @@ pub const Compiler = struct {
                 .relocable, .nonreloc => {
                     try self.discharge2anyreg(e);
                     try self.freeexp(e);
-                    const result_register = e.desc.nonreloc.result_register;
-                    const instruction_index = try self.emitInstruction(Instruction.Not.init(result_register));
+                    const value_reg = e.desc.nonreloc.result_register;
+                    const instruction_index = try self.emitInstruction(
+                        // result register is to-be-determined
+                        Instruction.Not.init(0, value_reg),
+                    );
                     e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
                 },
                 else => unreachable,
             }
-            if (e.patch_list != null) {
+            if (e.hasjumps()) {
                 @panic("TODO");
             }
         }
@@ -567,11 +583,12 @@ pub const Compiler = struct {
                 .concat => {
                     try self.exp2val(e2);
                     if (e2.desc == .relocable and self.getcode(e2).op == .concat) {
-                        const e1_result_register = e1.desc.nonreloc.result_register;
-                        var e2_instruction = @ptrCast(*Instruction.ABC, self.getcode(e2));
-                        std.debug.assert(e1_result_register == e2_instruction.b - 1);
+                        const new_start_reg = e1.desc.nonreloc.result_register;
+                        var concat_inst = @ptrCast(*Instruction.Concat, self.getcode(e2));
+                        // Needs to remain consecutive
+                        std.debug.assert(new_start_reg + 1 == concat_inst.getStartReg());
                         try self.freeexp(e1);
-                        e2_instruction.b = e1_result_register;
+                        concat_inst.setStartReg(new_start_reg);
                         e1.desc = .{ .relocable = .{ .instruction_index = e2.desc.relocable.instruction_index } };
                     } else {
                         // operand must be on the 'stack'
@@ -613,7 +630,10 @@ pub const Compiler = struct {
                     }
                     try self.freeexp(e1);
                 }
-                const instruction_index = try self.emitInstruction(Instruction.BinaryMath.init(op, 0, o1, o2));
+                const instruction_index = try self.emitInstruction(
+                    // result register is to-be-determined
+                    Instruction.BinaryMath.init(op, 0, o1, o2),
+                );
                 e1.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
             }
         }
@@ -683,10 +703,10 @@ pub const Compiler = struct {
             vararg: InstructionIndex,
         },
         // TODO the types here should be revisited
-        patch_list: ?struct {
-            exit_when_true: ?i32,
-            exit_when_false: ?i32,
-        } = null,
+        patch_list: struct {
+            exit_when_true: ?usize = null,
+            exit_when_false: ?usize = null,
+        } = .{},
 
         // A wrapper struct for usize so that it can have a descriptive name
         // and each tag that uses it can share the same type
@@ -713,7 +733,7 @@ pub const Compiler = struct {
         };
 
         pub fn hasjumps(self: *ExpDesc) bool {
-            return self.patch_list != null;
+            return self.patch_list.exit_when_true != null or self.patch_list.exit_when_false != null;
         }
 
         pub fn hasmultret(self: *ExpDesc) bool {
@@ -721,7 +741,7 @@ pub const Compiler = struct {
         }
 
         pub fn isnumeral(self: *ExpDesc) bool {
-            return self.desc == .number and self.patch_list == null;
+            return self.desc == .number and !self.hasjumps();
         }
     };
 
@@ -958,7 +978,7 @@ pub const Compiler = struct {
                 if (self.func.cur_exp.desc == .call and num_return_values.? == 1) {
                     const instruction = @ptrCast(*Instruction.Call, self.func.getcode(&self.func.cur_exp));
                     instruction.instruction.op = .tailcall;
-                    std.debug.assert(instruction.getBaseReg() == self.func.num_active_local_vars);
+                    std.debug.assert(instruction.getResultRegStart() == self.func.num_active_local_vars);
                 }
                 first_return_reg = self.func.num_active_local_vars;
                 num_return_values = null;
@@ -1146,6 +1166,16 @@ test "compile local statements" {
     try testCompile("local a, b = 1, 2, 3");
 }
 
+test "loadnil to multiple variables + some quirks" {
+    // no loadnil needs to be emitted, since they default to nil
+    try testCompile("local a,b,c,d");
+    // loadnil gets emitted here though because there's now a loadk
+    // instruction before the a,b,c,d locals
+    try testCompile("local e = 0; local a,b,c,d");
+    // back to no loadnil if the explicit initialization is moved to the end
+    try testCompile("local a,b,c,d; local e = 0");
+}
+
 test "assigning a local to another local's value" {
     try testCompile("local a, b; b = a");
 }
@@ -1187,6 +1217,10 @@ test "setglobal" {
     try testCompile("a, b, c = 1, 2, 3");
     try testCompile("a = 1, 2, 3");
     try testCompile("a, b, c = 1");
+}
+
+test "getglobal and setglobal" {
+    try testCompile("a = 40; local b = a");
 }
 
 test "newtable" {

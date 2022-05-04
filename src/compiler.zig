@@ -461,8 +461,10 @@ pub const Compiler = struct {
 
         pub fn storevar(self: *Func, var_e: *ExpDesc, e: *ExpDesc) !void {
             switch (var_e.desc) {
-                .local_register => {
-                    @panic("TODO");
+                .local_register => |local_register| {
+                    try self.freeexp(e);
+                    try self.exp2reg(e, local_register);
+                    return;
                 },
                 .upvalue_index => {
                     @panic("TODO");
@@ -1142,6 +1144,10 @@ test "compile local statements" {
     try testCompile("local a, b");
     try testCompile("local a, b = 1");
     try testCompile("local a, b = 1, 2, 3");
+}
+
+test "assigning a local to another local's value" {
+    try testCompile("local a, b; b = a");
 }
 
 test "assignment from function return values" {

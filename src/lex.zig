@@ -181,7 +181,7 @@ pub const Token = struct {
                 if (std.ascii.isCntrl(self.char.?)) {
                     break :blk std.fmt.bufPrint(&token_name_buf, "char({d})", .{self.char.?}) catch unreachable;
                 } else {
-                    break :blk std.mem.span(@as(*const [1]u8, &self.char.?));
+                    break :blk @as(*const [1]u8, &self.char.?)[0..1];
                 }
             },
         };

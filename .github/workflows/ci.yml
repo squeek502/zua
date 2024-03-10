@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jethrodaniel/setup-zig@fix-caching
+        with:
+          version: 0.12.0-dev.3192+e2cbbd0c2
+
+      - name: Build
+        run: zig build
+
+      - name: Test
+        run: zig build test testlib fuzzed_strings fuzzed_lex lua51_tests

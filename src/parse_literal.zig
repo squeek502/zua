@@ -142,7 +142,7 @@ pub fn parseString(source_raw: []const u8, dest_buf: []u8) []u8 {
 
 test "parseString" {
     var buf_arr: [100]u8 = undefined;
-    var buf: []u8 = buf_arr[0..];
+    const buf: []u8 = buf_arr[0..];
     try std.testing.expectEqualSlices(u8, "hello", parseString("'hello'", buf));
     try std.testing.expectEqualSlices(u8, "hello", parseString("\"hello\"", buf));
     try std.testing.expectEqualSlices(u8, "hello", parseString("[[hello]]", buf));
@@ -182,7 +182,7 @@ pub fn parseNumber(source: []const u8) f64 {
     }
     if (source[0] == '0' and (source[1] == 'x' or source[1] == 'X')) {
         if (std.fmt.parseUnsigned(u64, source[2..], 16)) |number| {
-            return @intToFloat(f64, number);
+            return @floatFromInt(number);
         } else |err| switch (err) {
             error.InvalidCharacter => unreachable,
             error.Overflow => return std.math.inf(f64),

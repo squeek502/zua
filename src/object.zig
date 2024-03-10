@@ -123,28 +123,28 @@ pub const Function = struct {
     pub fn printCode(self: *Function) void {
         // TODO this is an (incomplete) direct port of the function PrintFunction in print.c
         // It could be cleaned up a lot.
-        for (self.code) |instruction, i| {
+        for (self.code, 0..) |instruction, i| {
             const op = instruction.op;
-            var a: i32 = instruction.a;
-            var b: i32 = @bitCast(Instruction.ABC, instruction).b;
-            var c: i32 = @bitCast(Instruction.ABC, instruction).c;
-            var bx: i32 = @bitCast(Instruction.ABx, instruction).bx;
-            var sbx: i32 = @bitCast(Instruction.AsBx, instruction).getSignedBx();
+            const a: i32 = instruction.a;
+            const b: i32 = @as(Instruction.ABC, @bitCast(instruction)).b;
+            const c: i32 = @as(Instruction.ABC, @bitCast(instruction)).c;
+            const bx: i32 = @as(Instruction.ABx, @bitCast(instruction)).bx;
+            const sbx: i32 = @as(Instruction.AsBx, @bitCast(instruction)).getSignedBx();
             std.debug.print("\t{d}\t", .{i + 1});
             std.debug.print("{s: <9}\t", .{@tagName(op)});
             switch (op.getOpMode()) {
                 .iABC => {
                     std.debug.print("{d}", .{a});
                     if (op.getBMode() != .NotUsed) {
-                        var b_for_display: i32 = if (zua.opcodes.rkIsConstant(@intCast(u9, b)))
-                            (-1 - @intCast(i32, zua.opcodes.rkGetConstantIndex(@intCast(u9, b))))
+                        const b_for_display: i32 = if (zua.opcodes.rkIsConstant(@intCast(b)))
+                            (-1 - @as(i32, @intCast(zua.opcodes.rkGetConstantIndex(@intCast(b)))))
                         else
                             b;
                         std.debug.print(" {d}", .{b_for_display});
                     }
                     if (op.getCMode() != .NotUsed) {
-                        var c_for_display: i32 = if (zua.opcodes.rkIsConstant(@intCast(u9, c)))
-                            (-1 - @intCast(i32, zua.opcodes.rkGetConstantIndex(@intCast(u9, c))))
+                        const c_for_display: i32 = if (zua.opcodes.rkIsConstant(@intCast(c)))
+                            (-1 - @as(i32, @intCast(zua.opcodes.rkGetConstantIndex(@intCast(c)))))
                         else
                             c;
                         std.debug.print(" {d}", .{c_for_display});
@@ -170,8 +170,8 @@ pub const Function = struct {
 pub const Constant = union(Constant.Type) {
     string: []const u8,
     number: f64,
-    boolean: bool,
     nil: void,
+    boolean: bool,
 
     pub const Type = enum {
         string,
@@ -192,7 +192,7 @@ pub const Constant = union(Constant.Type) {
                     const floatBits = @typeInfo(@TypeOf(val)).Float.bits;
                     const hashType = std.meta.Int(.unsigned, floatBits);
                     const autoHashFn = std.hash_map.getAutoHashFn(hashType, void);
-                    return autoHashFn({}, @bitCast(hashType, val));
+                    return autoHashFn({}, @bitCast(val));
                 },
                 .string => |val| {
                     return std.hash_map.hashString(val);
@@ -228,8 +228,8 @@ pub fn getChunkId(source: []const u8, buf: []u8) []u8 {
         switch (source[0]) {
             '=' => {
                 // remove first char, truncate to buf capacity if needed
-                const source_for_display = source[1..std.math.min(buf.len + 1, source.len)];
-                std.mem.copy(u8, buf, source_for_display);
+                const source_for_display = source[1..@min(buf.len + 1, source.len)];
+                @memcpy(buf[0..source_for_display.len], source_for_display);
                 break :buf_end source_for_display.len;
             },
             '@' => {
@@ -240,10 +240,10 @@ pub fn getChunkId(source: []const u8, buf: []u8) []u8 {
                 if (source_for_display.len > max_truncated_len) {
                     const source_start_index = source_for_display.len - max_truncated_len;
                     source_for_display = source_for_display[source_start_index..];
-                    std.mem.copy(u8, buf, ellipsis);
+                    @memcpy(buf[0..ellipsis.len], ellipsis);
                     buf_index += ellipsis.len;
                 }
-                std.mem.copy(u8, buf[buf_index..], source_for_display);
+                @memcpy(buf[buf_index..][0..source_for_display.len], source_for_display);
                 break :buf_end buf_index + source_for_display.len;
             },
             else => {
@@ -322,16 +322,16 @@ pub fn intToFloatingPointByte(_x: FloatingPointByteIntType) u8 {
         e += 1;
     }
     if (x < 8) {
-        return @intCast(u8, x);
+        return @intCast(x);
     } else {
-        return @intCast(u8, ((e + 1) << 3) | (x - 8));
+        return @intCast(((e + 1) << 3) | (x - 8));
     }
 }
 
 /// Equivalent to luaO_fb2int in lobject.c
 pub fn floatingPointByteToInt(_x: u8) FloatingPointByteIntType {
-    var x: FloatingPointByteIntType = _x;
-    var e: u5 = @intCast(u5, x >> 3);
+    const x: FloatingPointByteIntType = _x;
+    const e: u5 = @intCast(x >> 3);
     if (e == 0) {
         return x;
     } else {

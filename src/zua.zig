@@ -14,14 +14,5 @@ pub const debug = @import("debug.zig");
 pub fn main() void {}
 
 test "zua" {
-    _ = @import("lex.zig");
-    _ = @import("parse.zig");
-    _ = @import("parse_literal.zig");
-    _ = @import("object.zig");
-    _ = @import("table.zig");
-    _ = @import("opcodes.zig");
-    _ = @import("dump.zig");
-    _ = @import("compiler.zig");
-    _ = @import("ast.zig");
-    _ = @import("debug.zig");
+    std.testing.refAllDecls(@This());
 }

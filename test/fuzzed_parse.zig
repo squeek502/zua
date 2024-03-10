@@ -33,7 +33,7 @@ test "fuzzed_parse input/output pairs" {
     var nbytecode: usize = 0;
     var inputs_iterator = inputs_dir.iterate();
     while (try inputs_iterator.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         if (verboseTestPrinting) {
             std.debug.print("\n{s}\n", .{entry.name});
@@ -101,9 +101,9 @@ test "fuzzed_parse input/output pairs" {
                 const err_msg = try parser.renderErrorAlloc(allocator);
                 defer allocator.free(err_msg);
 
-                var nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
+                const nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
                 if (nearIndex) |i| {
-                    try std.testing.expectEqualStrings(expectedContents[0..i], err_msg[0..std.math.min(i, err_msg.len)]);
+                    try std.testing.expectEqualStrings(expectedContents[0..i], err_msg[0..@min(i, err_msg.len)]);
                     if (printErrorContextDifferences) {
                         if (!std.mem.eql(u8, expectedContents, err_msg)) {
                             std.debug.print("\n{s}\nexpected: {s}\nactual: {s}\n", .{ entry.name, std.fmt.fmtSliceEscapeLower(expectedContents), std.fmt.fmtSliceEscapeLower(err_msg) });
@@ -128,7 +128,7 @@ test "fuzzed_parse input/output pairs" {
 
 pub fn isInErrorSet(err: anyerror, comptime T: type) bool {
     for (std.meta.fields(T)) |field| {
-        if (std.mem.eql(u8, std.meta.tagName(err), field.name)) {
+        if (std.mem.eql(u8, @errorName(err), field.name)) {
             return true;
         }
     }

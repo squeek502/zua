@@ -12,7 +12,7 @@ test "parsing lua 5.1 test files" {
 
     var inputs_iterator = inputs_dir.iterate();
     while (try inputs_iterator.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
         if (!std.mem.eql(u8, ".lua", std.fs.path.extension(entry.name))) continue;
 
         const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));

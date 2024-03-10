@@ -126,7 +126,7 @@ pub const Token = struct {
         var array: [keywordMapping.len][]const u8 = undefined;
         for (keywordMapping) |mapping| {
             const name = mapping[0];
-            const id = @enumToInt(@as(Id, mapping[1]));
+            const id = @intFromEnum(@as(Id, mapping[1]));
             array[id] = name;
         }
         break :blk array;
@@ -166,7 +166,7 @@ pub const Token = struct {
             .keyword_true,
             .keyword_until,
             .keyword_while,
-            => keywordNames[@enumToInt(self.id)],
+            => keywordNames[@intFromEnum(self.id)],
             .concat => "..",
             .ellipsis => "...",
             .eq => "==",
@@ -178,7 +178,7 @@ pub const Token = struct {
             .string => "<string>",
             .eof => "<eof>",
             .single_char => blk: {
-                if (std.ascii.isCntrl(self.char.?)) {
+                if (std.ascii.isControl(self.char.?)) {
                     break :blk std.fmt.bufPrint(&token_name_buf, "char({d})", .{self.char.?}) catch unreachable;
                 } else {
                     break :blk @as(*const [1]u8, &self.char.?)[0..1];
@@ -1177,7 +1177,7 @@ test "5.1 check_next bug compat off" {
 fn expectLexError(expected: LexError, actual: anytype) !void {
     if (veryVerboseLexing) std.debug.print("\n", .{});
     try std.testing.expectError(expected, actual);
-    if (dumpTokensDuringTests) std.debug.print("{}\n", .{actual});
+    if (dumpTokensDuringTests) std.debug.print("{!}\n", .{actual});
 }
 
 fn testLex(source: []const u8, expected_tokens: []const Token.Id) !void {

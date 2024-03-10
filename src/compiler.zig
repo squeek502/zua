@@ -62,7 +62,7 @@ pub const Compiler = struct {
     pub const Func = struct {
         max_stack_size: u8 = 2, // registers 0/1 are always valid
         free_register: u8 = 0, // TODO what should this type actually be?
-        cur_exp: ExpDesc = .{ .desc = .{ .@"void" = {} } },
+        cur_exp: ExpDesc = .{ .desc = .{ .void = {} } },
         code: std.ArrayList(Instruction),
         constants: std.ArrayList(Constant),
         constants_map: Constant.Map,
@@ -136,12 +136,12 @@ pub const Compiler = struct {
                     );
                     e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
                 },
-                .indexed => |indexed| {
-                    self.freereg(indexed.key_register_or_constant_index);
-                    self.freereg(indexed.table_register);
+                .indexed => |indexed_desc| {
+                    self.freereg(indexed_desc.key_register_or_constant_index);
+                    self.freereg(indexed_desc.table_register);
                     const instruction_index = try self.emitInstruction(
                         // result register is to-be-determined
-                        Instruction.GetTable.init(0, indexed.table_register, indexed.key_register_or_constant_index),
+                        Instruction.GetTable.init(0, indexed_desc.table_register, indexed_desc.key_register_or_constant_index),
                     );
                     e.desc = .{ .relocable = .{ .instruction_index = instruction_index } };
                 },
@@ -154,10 +154,10 @@ pub const Compiler = struct {
 
         pub fn setoneret(self: *Func, e: *ExpDesc) !void {
             if (e.desc == .call) {
-                const instruction = @ptrCast(*Instruction.Call, self.getcode(e));
+                const instruction: *Instruction.Call = @ptrCast(self.getcode(e));
                 e.desc = .{ .nonreloc = .{ .result_register = instruction.getResultRegStart() } };
             } else if (e.desc == .vararg) {
-                const instruction = @ptrCast(*Instruction.VarArg, self.getcode(e));
+                const instruction: *Instruction.VarArg = @ptrCast(self.getcode(e));
                 instruction.setNumReturnValues(1);
 
                 const instruction_index = e.desc.vararg.instruction_index;
@@ -211,8 +211,8 @@ pub const Compiler = struct {
                 .nil => {
                     _ = try self.emitNil(reg, 1);
                 },
-                .@"false", .@"true" => {
-                    _ = try self.emitInstruction(Instruction.LoadBool.init(reg, e.desc == .@"true", false));
+                .false, .true => {
+                    _ = try self.emitInstruction(Instruction.LoadBool.init(reg, e.desc == .true, false));
                 },
                 .constant_index => {
                     _ = try self.emitInstruction(Instruction.LoadK.init(reg, e.desc.constant_index));
@@ -227,7 +227,7 @@ pub const Compiler = struct {
                 },
                 .relocable => {
                     const instruction = self.getcode(e);
-                    const instructionABC = @ptrCast(*Instruction.ABC, instruction);
+                    const instructionABC: *Instruction.ABC = @ptrCast(instruction);
                     std.debug.assert(instructionABC.op.setsRegisterInA());
                     instructionABC.*.a = reg;
                 },
@@ -237,7 +237,7 @@ pub const Compiler = struct {
                         _ = try self.emitABC(.move, reg, result_register, 0);
                     }
                 },
-                .@"void", .jmp => return, // nothing to do
+                .void, .jmp => return, // nothing to do
                 else => unreachable,
             }
             e.desc = .{ .nonreloc = .{ .result_register = reg } };
@@ -266,7 +266,7 @@ pub const Compiler = struct {
                     }
                 }
             }
-            const register_range_end = @intCast(u9, register_range_start + n - 1);
+            const register_range_end: u9 = @intCast(register_range_start + n - 1);
             if (self.emitInstruction(Instruction.LoadNil.init(register_range_start, register_range_end))) |index| {
                 return index;
             } else |err| {
@@ -277,7 +277,7 @@ pub const Compiler = struct {
         /// Appends a new instruction to the Func's code and returns the
         /// index of the added instruction
         pub fn emitInstruction(self: *Func, instruction: anytype) !usize {
-            try self.code.append(@bitCast(Instruction, instruction));
+            try self.code.append(@bitCast(instruction));
             return self.pc() - 1;
         }
 
@@ -298,7 +298,7 @@ pub const Compiler = struct {
         pub fn putConstant(self: *Func, constant: Constant) Error!u18 {
             const result = try self.constants_map.getOrPut(constant);
             if (result.found_existing) {
-                return @intCast(u18, result.value_ptr.*);
+                return @intCast(result.value_ptr.*);
             } else {
                 const index = self.constants.items.len;
                 result.value_ptr.* = index;
@@ -309,7 +309,7 @@ pub const Compiler = struct {
                     return error.CompileError;
                 }
 
-                return @intCast(u18, index);
+                return @intCast(index);
             }
         }
 
@@ -332,32 +332,32 @@ pub const Compiler = struct {
         }
 
         pub fn adjust_assign(self: *Func, num_vars: usize, num_values: usize, e: *ExpDesc) !void {
-            var extra: isize = @intCast(isize, num_vars) - @intCast(isize, num_values);
+            var extra: isize = @as(isize, @intCast(num_vars)) - @as(isize, @intCast(num_values));
             if (e.hasmultret()) {
                 extra += 1;
                 if (extra < 0) extra = 0;
-                try self.setreturns(e, @intCast(u9, extra));
+                try self.setreturns(e, @intCast(extra));
                 if (extra > 1) {
-                    try self.reserveregs(@intCast(u8, extra - 1));
+                    try self.reserveregs(@intCast(extra - 1));
                 }
             } else {
-                if (e.desc != .@"void") {
+                if (e.desc != .void) {
                     _ = try self.exp2nextreg(e);
                 }
                 if (extra > 0) {
                     const reg = self.free_register;
-                    try self.reserveregs(@intCast(u8, extra));
-                    _ = try self.emitNil(reg, @intCast(usize, extra));
+                    try self.reserveregs(@intCast(extra));
+                    _ = try self.emitNil(reg, @intCast(extra));
                 }
             }
         }
 
         pub fn setreturns(self: *Func, e: *ExpDesc, num_results: ?u9) !void {
             if (e.desc == .call) {
-                const instruction = @ptrCast(*Instruction.Call, self.getcode(e));
+                const instruction: *Instruction.Call = @ptrCast(self.getcode(e));
                 instruction.setNumReturnValues(num_results);
             } else if (e.desc == .vararg) {
-                const instruction = @ptrCast(*Instruction.VarArg, self.getcode(e));
+                const instruction: *Instruction.VarArg = @ptrCast(self.getcode(e));
                 instruction.setNumReturnValues(num_results);
                 instruction.setFirstReturnValueRegister(self.free_register);
                 try self.reserveregs(1);
@@ -369,7 +369,7 @@ pub const Compiler = struct {
         }
 
         pub fn adjustlocalvars(self: *Func, num_vars: usize) !void {
-            self.num_active_local_vars += @intCast(u8, num_vars);
+            self.num_active_local_vars += @intCast(num_vars);
             var num_vars_remaining = num_vars;
             while (num_vars_remaining > 0) : (num_vars_remaining -= 1) {
                 const local_var = self.getlocvar(self.num_active_local_vars - num_vars_remaining);
@@ -419,27 +419,27 @@ pub const Compiler = struct {
         pub fn exp2RK(self: *Func, e: *ExpDesc) !u9 {
             try self.exp2val(e);
             switch (e.desc) {
-                .number, .@"true", .@"false", .nil => {
+                .number, .true, .false, .nil => {
                     if (self.constants.items.len <= zua.opcodes.rk_max_constant_index) {
-                        var constant: Constant = switch (e.desc) {
+                        const constant: Constant = switch (e.desc) {
                             .nil => Constant{ .nil = {} },
-                            .@"true", .@"false" => Constant{ .boolean = e.desc == .@"true" },
+                            .true, .false => Constant{ .boolean = e.desc == .true },
                             .number => Constant{ .number = e.desc.number },
                             else => unreachable,
                         };
                         const index = try self.putConstant(constant);
-                        return zua.opcodes.constantIndexToRK(@intCast(u9, index));
+                        return zua.opcodes.constantIndexToRK(@intCast(index));
                     }
                 },
                 .constant_index => {
                     if (e.desc.constant_index <= zua.opcodes.rk_max_constant_index) {
-                        return zua.opcodes.constantIndexToRK(@intCast(u9, e.desc.constant_index));
+                        return zua.opcodes.constantIndexToRK(@intCast(e.desc.constant_index));
                     }
                 },
                 else => {},
             }
             // not a constant in the right range, put it in a register
-            return @intCast(u9, try self.exp2anyreg(e));
+            return @intCast(try self.exp2anyreg(e));
         }
 
         pub fn indexed(self: *Func, table: *ExpDesc, key: *ExpDesc) !void {
@@ -504,7 +504,7 @@ pub const Compiler = struct {
             // is just the value itself (no opcode, etc)
             if (setlist_inst.isBatchNumberStoredInNextInstruction()) {
                 const flush_batch_num = Instruction.SetList.numValuesToFlushBatchNum(num_values);
-                _ = try self.emitInstruction(@intCast(u32, flush_batch_num));
+                _ = try self.emitInstruction(@as(u32, @intCast(flush_batch_num)));
             }
 
             self.free_register = base + 1;
@@ -513,11 +513,11 @@ pub const Compiler = struct {
         pub fn codenot(self: *Func, e: *ExpDesc) !void {
             try self.dischargevars(e);
             switch (e.desc) {
-                .nil, .@"false" => {
-                    e.desc = .{ .@"true" = {} };
+                .nil, .false => {
+                    e.desc = .{ .true = {} };
                 },
-                .constant_index, .number, .@"true" => {
-                    e.desc = .{ .@"false" = {} };
+                .constant_index, .number, .true => {
+                    e.desc = .{ .false = {} };
                 },
                 .jmp => @panic("TODO"),
                 .relocable, .nonreloc => {
@@ -584,7 +584,7 @@ pub const Compiler = struct {
                     try self.exp2val(e2);
                     if (e2.desc == .relocable and self.getcode(e2).op == .concat) {
                         const new_start_reg = e1.desc.nonreloc.result_register;
-                        var concat_inst = @ptrCast(*Instruction.Concat, self.getcode(e2));
+                        var concat_inst: *Instruction.Concat = @ptrCast(self.getcode(e2));
                         // Needs to remain consecutive
                         std.debug.assert(new_start_reg + 1 == concat_inst.getStartReg());
                         try self.freeexp(e1);
@@ -679,10 +679,10 @@ pub const Compiler = struct {
 
     pub const ExpDesc = struct {
         desc: union(ExpDesc.Kind) {
-            @"void": void,
+            void: void,
             nil: void,
-            @"true": void,
-            @"false": void,
+            true: void,
+            false: void,
             constant_index: u18,
             number: f64,
             local_register: u8,
@@ -715,10 +715,10 @@ pub const Compiler = struct {
         };
 
         pub const Kind = enum {
-            @"void",
+            void,
             nil,
-            @"true",
-            @"false",
+            true,
+            false,
             constant_index,
             number,
             local_register,
@@ -746,7 +746,7 @@ pub const Compiler = struct {
     };
 
     pub fn genChunk(self: *Compiler, chunk: *Node.Chunk) Error!*Func {
-        var main_func: *Func = try self.arena.create(Func);
+        const main_func: *Func = try self.arena.create(Func);
         main_func.* = .{
             .code = std.ArrayList(Instruction).init(self.arena),
             .constants = std.ArrayList(Constant).init(self.arena),
@@ -827,16 +827,16 @@ pub const Compiler = struct {
         var num_keyed_values: zua.object.FloatingPointByteIntType = 0;
         var num_array_values: zua.object.FloatingPointByteIntType = 0;
         var unflushed_array_values: u8 = 0;
-        var array_value_exp: ExpDesc = .{ .desc = .{ .@"void" = {} } };
+        var array_value_exp: ExpDesc = .{ .desc = .{ .void = {} } };
         for (table_constructor.fields) |field_node_base| {
             const prev_exp = self.func.cur_exp;
 
             // this is here so that the last array value does not get exp2nextreg called
             // on it, because we need to handle it differently if it has an unknown number
             // of returns
-            if (array_value_exp.desc != .@"void") {
+            if (array_value_exp.desc != .void) {
                 _ = try self.func.exp2nextreg(&array_value_exp);
-                array_value_exp = .{ .desc = .{ .@"void" = {} } };
+                array_value_exp = .{ .desc = .{ .void = {} } };
 
                 if (unflushed_array_values >= Instruction.SetList.fields_per_flush) {
                     try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
@@ -865,7 +865,7 @@ pub const Compiler = struct {
                 // we don't know how many elements will actually be added
                 num_array_values -= 1;
             } else {
-                if (array_value_exp.desc != .@"void") {
+                if (array_value_exp.desc != .void) {
                     _ = try self.func.exp2nextreg(&array_value_exp);
                 }
                 try self.func.setlist(table_reg, num_array_values, unflushed_array_values);
@@ -873,7 +873,7 @@ pub const Compiler = struct {
         }
 
         if (table_constructor.fields.len > 0) {
-            const newtable_instruction = @ptrCast(*Instruction.NewTable, &self.func.code.items[instruction_index]);
+            const newtable_instruction: *Instruction.NewTable = @ptrCast(&self.func.code.items[instruction_index]);
             newtable_instruction.setArraySize(num_array_values);
             newtable_instruction.setTableSize(num_keyed_values);
         }
@@ -900,7 +900,7 @@ pub const Compiler = struct {
 
     pub fn genAssignmentStatement(self: *Compiler, assignment_statement: *Node.AssignmentStatement) Error!void {
         if (assignment_statement.is_local) {
-            for (assignment_statement.variables) |variable_node, i| {
+            for (assignment_statement.variables, 0..) |variable_node, i| {
                 // we can be certain that this is an identifier when assigning with the local keyword
                 const identifier_node = @fieldParentPtr(Node.Identifier, "base", variable_node);
                 const name_token = identifier_node.token;
@@ -910,7 +910,7 @@ pub const Compiler = struct {
 
             if (assignment_statement.values.len == 0) {
                 self.func.cur_exp = .{
-                    .desc = .{ .@"void" = {} },
+                    .desc = .{ .void = {} },
                 };
             }
             try self.func.adjust_assign(assignment_statement.variables.len, assignment_statement.values.len, &self.func.cur_exp);
@@ -921,7 +921,7 @@ pub const Compiler = struct {
             const var_exps = try self.arena.alloc(ExpDesc, assignment_statement.variables.len);
             defer self.arena.free(var_exps);
 
-            for (assignment_statement.variables) |variable_node, i| {
+            for (assignment_statement.variables, 0..) |variable_node, i| {
                 try self.genNode(variable_node);
                 // store the ExpDesc's for use later
                 var_exps[i] = self.func.cur_exp;
@@ -933,7 +933,7 @@ pub const Compiler = struct {
                 try self.func.adjust_assign(assignment_statement.variables.len, assignment_statement.values.len, &self.func.cur_exp);
                 if (assignment_statement.values.len > assignment_statement.variables.len) {
                     // remove extra values
-                    self.func.free_register -= @intCast(u8, assignment_statement.values.len - assignment_statement.variables.len);
+                    self.func.free_register -= @intCast(assignment_statement.values.len - assignment_statement.variables.len);
                 }
             } else {
                 try self.func.setoneret(&self.func.cur_exp);
@@ -956,7 +956,7 @@ pub const Compiler = struct {
 
     /// helper function equivalent to explist1 in lparser.c
     fn genExpList1(self: *Compiler, nodes: []*Node) Error!void {
-        for (nodes) |node, i| {
+        for (nodes, 0..) |node, i| {
             try self.genNode(node);
             // skip the last one
             if (i != nodes.len - 1) {
@@ -967,7 +967,7 @@ pub const Compiler = struct {
 
     pub fn genReturnStatement(self: *Compiler, return_statement: *Node.ReturnStatement) Error!void {
         var first_return_reg: u8 = 0;
-        var num_return_values: ?u9 = @intCast(u9, return_statement.values.len);
+        var num_return_values: ?u9 = @intCast(return_statement.values.len);
 
         if (num_return_values.? > 0) {
             try self.genExpList1(return_statement.values);
@@ -976,7 +976,7 @@ pub const Compiler = struct {
                 try self.func.setmultret(&self.func.cur_exp);
                 // tail call?
                 if (self.func.cur_exp.desc == .call and num_return_values.? == 1) {
-                    const instruction = @ptrCast(*Instruction.Call, self.func.getcode(&self.func.cur_exp));
+                    const instruction: *Instruction.Call = @ptrCast(self.func.getcode(&self.func.cur_exp));
                     instruction.instruction.op = .tailcall;
                     std.debug.assert(instruction.getResultRegStart() == self.func.num_active_local_vars);
                 }
@@ -1008,17 +1008,17 @@ pub const Compiler = struct {
         }
         const func_exp = self.func.cur_exp;
         std.debug.assert(func_exp.desc == .nonreloc);
-        const base: u8 = @intCast(u8, func_exp.desc.nonreloc.result_register);
+        const base: u8 = @intCast(func_exp.desc.nonreloc.result_register);
 
         for (call.arguments) |argument_node| {
             try self.genNode(argument_node);
             _ = try self.func.exp2nextreg(&self.func.cur_exp);
         }
-        var nparams = self.func.free_register - (base + 1);
+        const nparams = self.func.free_register - (base + 1);
 
         // assume 1 return value if this is not a statement, will be modified as necessary later
         const num_return_values: u9 = if (call.is_statement) 0 else 1;
-        const index = try self.func.emitInstruction(Instruction.Call.init(base, @intCast(u9, nparams), num_return_values));
+        const index = try self.func.emitInstruction(Instruction.Call.init(base, @intCast(nparams), num_return_values));
         self.func.cur_exp = .{ .desc = .{ .call = .{ .instruction_index = index } } };
 
         // call removes function and arguments, and leaves (unless changed) one result
@@ -1029,7 +1029,7 @@ pub const Compiler = struct {
         switch (literal.token.id) {
             .string => {
                 const string_source = self.source[literal.token.start..literal.token.end];
-                var buf = try self.arena.alloc(u8, string_source.len);
+                const buf = try self.arena.alloc(u8, string_source.len);
                 defer self.arena.free(buf);
                 const parsed = zua.parse_literal.parseString(string_source, buf);
                 const index = try self.putConstant(Constant{ .string = parsed });
@@ -1041,10 +1041,10 @@ pub const Compiler = struct {
                 self.func.cur_exp.desc = .{ .number = parsed };
             },
             .keyword_true => {
-                self.func.cur_exp.desc = .{ .@"true" = .{} };
+                self.func.cur_exp.desc = .{ .true = {} };
             },
             .keyword_false => {
-                self.func.cur_exp.desc = .{ .@"false" = .{} };
+                self.func.cur_exp.desc = .{ .false = {} };
             },
             .keyword_nil => {
                 self.func.cur_exp.desc = .{ .nil = {} };
@@ -1064,7 +1064,7 @@ pub const Compiler = struct {
 
     pub fn genIdentifier(self: *Compiler, node: *Node.Identifier) Error!void {
         if (self.func.findLocalVarByToken(node.token, self.source)) |active_local_var_index| {
-            self.func.cur_exp = .{ .desc = .{ .local_register = @intCast(u8, active_local_var_index) } };
+            self.func.cur_exp = .{ .desc = .{ .local_register = @intCast(active_local_var_index) } };
             // TODO if (!base) markupval()
         } else {
             // TODO upvalues
@@ -1100,7 +1100,7 @@ pub const Compiler = struct {
         var table_exp = self.func.cur_exp;
 
         // reset and then restore afterwards
-        self.func.cur_exp = ExpDesc{ .desc = .{ .@"void" = {} } };
+        self.func.cur_exp = ExpDesc{ .desc = .{ .void = {} } };
 
         try self.genNode(node.index);
         try self.func.exp2val(&self.func.cur_exp);

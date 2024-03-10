@@ -29,10 +29,10 @@ fn checkArgMode(function: *const Function, val: i32, mode: OpCode.OpArgMask) !vo
         },
         .Used => {},
         .RegisterOrJumpOffset => {
-            try checkreg(function, @intCast(usize, val));
+            try checkreg(function, @intCast(val));
         },
         .ConstantOrRegisterConstant => {
-            const actual_size_val = @intCast(u9, val);
+            const actual_size_val: u9 = @intCast(val);
             const is_constant = zua.opcodes.rkIsConstant(actual_size_val);
             if (is_constant) {
                 if (zua.opcodes.rkGetConstantIndex(actual_size_val) >= function.constants.len) return error.ConstantIndexOutOfRange;
@@ -55,7 +55,7 @@ pub fn checkopenop(instruction: Instruction) !void {
         .@"return",
         .setlist,
         => {
-            const b = @bitCast(Instruction.ABC, instruction).b;
+            const b = @as(Instruction.ABC, @bitCast(instruction)).b;
             if (b != 0) return error.InvalidInstructionAfterOpenCall;
         },
         else => return error.InvalidInstructionAfterOpenCall,
@@ -67,7 +67,7 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
     // defaults to final return (a 'neutral' instruction)
     var last_instruction_that_changed_reg: usize = function.code.len - 1;
     var instructions_to_skip: usize = 0;
-    for (function.code) |instruction, i| {
+    for (function.code, 0..) |instruction, i| {
         if (instructions_to_skip > 0) {
             instructions_to_skip -= 1;
             continue;
@@ -78,21 +78,21 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
         try checkreg(function, a);
         switch (instruction.op.getOpMode()) {
             .iABC => {
-                const instructionABC = @bitCast(Instruction.ABC, instruction);
+                const instructionABC: Instruction.ABC = @bitCast(instruction);
                 b = instructionABC.b;
                 c = instructionABC.c;
                 try checkArgMode(function, b, instruction.op.getBMode());
                 try checkArgMode(function, c, instruction.op.getCMode());
             },
             .iABx => {
-                const instructionABx = @bitCast(Instruction.ABx, instruction);
+                const instructionABx: Instruction.ABx = @bitCast(instruction);
                 b = instructionABx.bx;
                 if (instruction.op.getBMode() == .ConstantOrRegisterConstant) {
                     if (b >= function.constants.len) return error.ConstantIndexOutOfRange;
                 }
             },
             .iAsBx => {
-                const instructionAsBx = @bitCast(Instruction.AsBx, instruction);
+                const instructionAsBx: Instruction.AsBx = @bitCast(instruction);
                 b = instructionAsBx.getSignedBx();
                 if (instruction.op.getBMode() == .RegisterOrJumpOffset) {
                     @panic("TODO");
@@ -111,23 +111,23 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
         }
         switch (instruction.op) {
             .loadbool => {
-                const bool_inst = @bitCast(Instruction.LoadBool, instruction);
+                const bool_inst: Instruction.LoadBool = @bitCast(instruction);
                 if (bool_inst.doesJump()) {
                     if (i + 2 >= function.code.len) return error.ImpossibleLoadBoolInstructionPlacement;
                     const next_instruction = function.code[i + 1];
-                    const check = next_instruction.op != .setlist or @bitCast(Instruction.ABC, next_instruction).c != 0;
+                    const check = next_instruction.op != .setlist or @as(Instruction.ABC, @bitCast(next_instruction)).c != 0;
                     if (!check) return error.ImpossibleInstructionAfterLoadBool;
                 }
             },
             .loadnil => {
-                const loadnil_inst = @bitCast(Instruction.LoadNil, instruction);
-                if (reg != null and loadnil_inst.willAssignToRegister(@intCast(u8, reg.?))) {
+                const loadnil_inst: Instruction.LoadNil = @bitCast(instruction);
+                if (reg != null and loadnil_inst.willAssignToRegister(@intCast(reg.?))) {
                     last_instruction_that_changed_reg = i;
                 }
             },
             //.getupval, .setupval => {},
             .getglobal, .setglobal => {
-                const constant = function.constants[@intCast(usize, b)];
+                const constant = function.constants[@intCast(b)];
                 if (constant != .string) return error.ExpectedStringForGetOrSetGlobal;
             },
             .self => {
@@ -137,7 +137,7 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 }
             },
             .concat => {
-                const concat_inst = @bitCast(Instruction.Concat, instruction);
+                const concat_inst: Instruction.Concat = @bitCast(instruction);
                 if (concat_inst.numConcattedValues() < 2) {
                     return error.ConcatRequiresAtLeastTwoOperands;
                 }
@@ -146,9 +146,9 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
             //.forloop, .forprep => {},
             //.jmp => {},
             .call, .tailcall => {
-                const call_inst = @bitCast(Instruction.Call, instruction);
+                const call_inst: Instruction.Call = @bitCast(instruction);
                 if (b != 0) {
-                    try checkreg(function, @intCast(usize, a + call_inst.getNumParams()));
+                    try checkreg(function, @intCast(a + call_inst.getNumParams()));
                 }
                 const num_returns = call_inst.getNumReturnValues();
                 if (call_inst.isMultipleReturns()) {
@@ -162,16 +162,16 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
                 }
             },
             .@"return" => {
-                const ret_inst = @bitCast(Instruction.Return, instruction);
+                const ret_inst: Instruction.Return = @bitCast(instruction);
                 const num_returns = ret_inst.getNumReturnValues();
                 if (num_returns != null and num_returns.? > 0) {
-                    try checkreg(function, @intCast(usize, a + num_returns.? - 1));
+                    try checkreg(function, @intCast(a + num_returns.? - 1));
                 }
             },
             .setlist => {
-                const setlist_inst = @bitCast(Instruction.SetList, instruction);
+                const setlist_inst: Instruction.SetList = @bitCast(instruction);
                 if (b > 0) {
-                    try checkreg(function, @intCast(usize, a + b));
+                    try checkreg(function, @intCast(a + b));
                 }
                 if (setlist_inst.isBatchNumberStoredInNextInstruction()) {
                     if (i + 1 >= function.code.len) return error.ExpectedSetListBatchNumberInstruction;
@@ -180,7 +180,7 @@ fn symbexec(function: *const Function, reg: ?usize) !Instruction {
             },
             //.closure => {},
             .vararg => {
-                const vararg_inst = @bitCast(Instruction.VarArg, instruction);
+                const vararg_inst: Instruction.VarArg = @bitCast(instruction);
                 const num_returns = vararg_inst.getNumReturnValues();
                 if (num_returns == null) {
                     try checkopenop_next(function, i);

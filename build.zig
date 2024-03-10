@@ -1,39 +1,57 @@
 const std = @import("std");
-const Builder = std.build.Builder;
 
-pub fn build(b: *Builder) void {
-    const mode = b.standardReleaseOptions();
+pub fn build(b: *std.Build) void {
+    const mode = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
-    const exe = b.addExecutable("zua", "src/zua.zig");
-    exe.setBuildMode(mode);
-    exe.setTarget(target);
-    exe.install();
+    const exe = b.addExecutable(.{
+        .name = "zua",
+        .root_source_file = .{ .path = "src/zua.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-
+    const run_cmd = b.addRunArtifact(exe);
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    var lualib = addLuaLibrary(b, mode, target);
+    const zua = b.addModule("zua", .{
+        .root_source_file = .{ .path = "src/zua.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    const zuatest = b.createModule(.{
+        .root_source_file = .{ .path = "test/lib.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    zuatest.addIncludePath(.{ .path = "lua-5.1/src" });
 
-    var tests = b.addTest("src/zua.zig");
-    tests.setBuildMode(mode);
-    tests.setTarget(target);
+    const lualib = addLuaLibrary(b, mode, target);
+
+    var tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/zua.zig" },
+        .target = target,
+        .optimize = mode,
+    });
     tests.linkLibrary(lualib);
-    tests.addIncludePath("lua-5.1/src");
-    tests.addPackagePath("zuatest", "test/lib.zig");
+    tests.root_module.addImport("zuatest", zuatest);
+    const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run all tests");
-    test_step.dependOn(&tests.step);
+    test_step.dependOn(&run_tests.step);
 
-    var testlib_test = b.addTest("test/lib.zig");
-    testlib_test.setBuildMode(mode);
-    testlib_test.setTarget(target);
+    var testlib_test = b.addTest(.{
+        .name = "testlib",
+        .root_source_file = .{ .path = "test/lib.zig" },
+        .target = target,
+        .optimize = mode,
+    });
     testlib_test.linkLibrary(lualib);
-    testlib_test.addIncludePath("lua-5.1/src");
+    testlib_test.addIncludePath(.{ .path = "lua-5.1/src" });
+    const run_testlib_test = b.addRunArtifact(testlib_test);
     const testlib_test_step = b.step("testlib", "Run test library tests");
-    testlib_test_step.dependOn(&testlib_test.step);
+    testlib_test_step.dependOn(&run_testlib_test.step);
 
     const fuzzed_lex_inputs_dir_default = "test/corpus/fuzz_llex";
     const fuzzed_lex_outputs_dir_default = "test/output/fuzz_llex";
@@ -44,19 +62,29 @@ pub fn build(b: *Builder) void {
     fuzzed_lex_options.addOption([]const u8, "fuzzed_lex_inputs_dir", fuzzed_lex_inputs_dir);
     fuzzed_lex_options.addOption([]const u8, "fuzzed_lex_outputs_dir", fuzzed_lex_outputs_dir);
 
-    var fuzzed_lex_tests = b.addTest("test/fuzzed_lex.zig");
-    fuzzed_lex_tests.setBuildMode(mode);
-    fuzzed_lex_tests.addOptions("build_options", fuzzed_lex_options);
-    fuzzed_lex_tests.addPackagePath("zua", "src/zua.zig");
+    var fuzzed_lex_tests = b.addTest(.{
+        .name = "test-fuzzed_lex",
+        .root_source_file = .{ .path = "test/fuzzed_lex.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    fuzzed_lex_tests.root_module.addOptions("build_options", fuzzed_lex_options);
+    fuzzed_lex_tests.root_module.addImport("zua", zua);
+    const run_fuzzed_lex_tests = b.addRunArtifact(fuzzed_lex_tests);
     const fuzzed_lex_test_step = b.step("fuzzed_lex", "Test lexer against a fuzzed corpus from fuzzing-lua");
-    fuzzed_lex_test_step.dependOn(&fuzzed_lex_tests.step);
+    fuzzed_lex_test_step.dependOn(&run_fuzzed_lex_tests.step);
 
-    var bench_lex_tests = b.addTest("test/bench_lex.zig");
-    bench_lex_tests.setBuildMode(.ReleaseFast);
-    bench_lex_tests.addOptions("build_options", fuzzed_lex_options);
-    bench_lex_tests.addPackagePath("zua", "src/zua.zig");
+    var bench_lex_tests = b.addTest(.{
+        .name = "bench_lex",
+        .root_source_file = .{ .path = "test/bench_lex.zig" },
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    bench_lex_tests.root_module.addOptions("build_options", fuzzed_lex_options);
+    bench_lex_tests.root_module.addImport("zua", zua);
+    const run_bench_lex_tests = b.addRunArtifact(bench_lex_tests);
     const bench_lex_test_step = b.step("bench_lex", "Bench lexer against a fuzzed corpus from fuzzing-lua");
-    bench_lex_test_step.dependOn(&bench_lex_tests.step);
+    bench_lex_test_step.dependOn(&run_bench_lex_tests.step);
 
     const fuzzed_strings_inputs_dir_default = "test/corpus/fuzz_strings";
     const fuzzed_strings_outputs_dir_default = "test/output/fuzz_strings";
@@ -70,23 +98,35 @@ pub fn build(b: *Builder) void {
     fuzzed_strings_options.addOption([]const u8, "fuzzed_strings_outputs_dir", fuzzed_strings_outputs_dir);
     fuzzed_strings_options.addOption([]const u8, "fuzzed_strings_gen_dir", fuzzed_strings_gen_dir);
 
-    var fuzzed_strings = b.addTest("test/fuzzed_strings.zig");
-    fuzzed_strings.setBuildMode(mode);
-    fuzzed_strings.addOptions("build_options", fuzzed_strings_options);
-    fuzzed_strings.addPackagePath("zua", "src/zua.zig");
+    var fuzzed_strings = b.addTest(.{
+        .name = "test-fuzzed_strings",
+        .root_source_file = .{ .path = "test/fuzzed_strings.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    fuzzed_strings.root_module.addOptions("build_options", fuzzed_strings_options);
+    fuzzed_strings.root_module.addImport("zua", zua);
+    const run_fuzzed_strings = b.addRunArtifact(fuzzed_strings);
     const fuzzed_strings_step = b.step("fuzzed_strings", "Test string parsing against a fuzzed corpus from fuzzing-lua");
-    fuzzed_strings_step.dependOn(&fuzzed_strings.step);
+    fuzzed_strings_step.dependOn(&run_fuzzed_strings.step);
 
     const fuzzed_strings_gen_options = b.addOptions();
     fuzzed_strings_gen_options.addOption([]const u8, "fuzzed_lex_inputs_dir", fuzzed_lex_inputs_dir);
     fuzzed_strings_gen_options.addOption([]const u8, "fuzzed_strings_gen_dir", fuzzed_strings_gen_dir);
 
-    var fuzzed_strings_gen = b.addExecutable("fuzzed_strings_gen", "test/fuzzed_strings_gen.zig");
-    fuzzed_strings_gen.setBuildMode(mode);
-    fuzzed_strings_gen.addOptions("build_options", fuzzed_strings_gen_options);
-    fuzzed_strings_gen.addPackagePath("zua", "src/zua.zig");
+    var fuzzed_strings_gen = b.addExecutable(.{
+        .name = "fuzzed_strings_gen",
+        .root_source_file = .{ .path = "test/fuzzed_strings_gen.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    fuzzed_strings_gen.root_module.addOptions("build_options", fuzzed_strings_gen_options);
+    fuzzed_strings_gen.root_module.addImport("zua", zua);
+    const run_fuzzed_strings_gen = b.addRunArtifact(fuzzed_strings_gen);
+    const fuzzed_strings_gen_step = b.step("fuzzed_strings_gen", "Build fuzzed_strings_gen binary (but don't run it)");
+    fuzzed_strings_gen_step.dependOn(&fuzzed_strings_gen.step);
     const fuzzed_strings_gen_run_step = b.step("fuzzed_strings_gen_run", "Generate string inputs from a fuzzed corpus of lexer inputs");
-    fuzzed_strings_gen_run_step.dependOn(&fuzzed_strings_gen.run().step);
+    fuzzed_strings_gen_run_step.dependOn(&run_fuzzed_strings_gen.step);
 
     const fuzzed_parse_inputs_dir_default = "test/corpus/fuzz_lparser";
     const fuzzed_parse_outputs_dir_default = "test/output/fuzz_lparser";
@@ -97,19 +137,29 @@ pub fn build(b: *Builder) void {
     fuzzed_parse_options.addOption([]const u8, "fuzzed_parse_inputs_dir", fuzzed_parse_inputs_dir);
     fuzzed_parse_options.addOption([]const u8, "fuzzed_parse_outputs_dir", fuzzed_parse_outputs_dir);
 
-    var fuzzed_parse_tests = b.addTest("test/fuzzed_parse.zig");
-    fuzzed_parse_tests.setBuildMode(mode);
-    fuzzed_parse_tests.addOptions("build_options", fuzzed_parse_options);
-    fuzzed_parse_tests.addPackagePath("zua", "src/zua.zig");
+    var fuzzed_parse_tests = b.addTest(.{
+        .name = "test-fuzzed_parse",
+        .root_source_file = .{ .path = "test/fuzzed_parse.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    fuzzed_parse_tests.root_module.addOptions("build_options", fuzzed_parse_options);
+    fuzzed_parse_tests.root_module.addImport("zua", zua);
+    const run_fuzzed_parse_tests = b.addRunArtifact(fuzzed_parse_tests);
     const fuzzed_parse_test_step = b.step("fuzzed_parse", "Test parser against a fuzzed corpus from fuzzing-lua");
-    fuzzed_parse_test_step.dependOn(&fuzzed_parse_tests.step);
+    fuzzed_parse_test_step.dependOn(&run_fuzzed_parse_tests.step);
 
-    var fuzzed_parse_prune = b.addExecutable("fuzzed_parse_prune", "test/fuzzed_parse_prune.zig");
-    fuzzed_parse_prune.setBuildMode(mode);
-    fuzzed_parse_prune.addOptions("build_options", fuzzed_parse_options);
-    fuzzed_parse_prune.addPackagePath("zua", "src/zua.zig");
+    var fuzzed_parse_prune = b.addExecutable(.{
+        .name = "fuzzed_parse_prune",
+        .root_source_file = .{ .path = "test/fuzzed_parse_prune.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    fuzzed_parse_prune.root_module.addOptions("build_options", fuzzed_parse_options);
+    fuzzed_parse_prune.root_module.addImport("zua", zua);
+    const run_fuzzed_parse_prune = b.addRunArtifact(fuzzed_parse_prune);
     const fuzzed_parse_prune_step = b.step("fuzzed_parse_prune", "Prune fuzzed parser corpus to remove lexer-specific error outputs");
-    fuzzed_parse_prune_step.dependOn(&fuzzed_parse_prune.run().step);
+    fuzzed_parse_prune_step.dependOn(&run_fuzzed_parse_prune.step);
 
     const lua51_tests_inputs_dir_default = "lua-5.1/test";
     const lua51_tests_inputs_dir = b.option([]const u8, "lua51_tests_inputs_dir", "Directory with the PUC Lua test files") orelse lua51_tests_inputs_dir_default;
@@ -117,52 +167,62 @@ pub fn build(b: *Builder) void {
     const lua51_tests_options = b.addOptions();
     lua51_tests_options.addOption([]const u8, "lua51_tests_inputs_dir", lua51_tests_inputs_dir);
 
-    var lua51_tests = b.addTest("test/lua51_tests.zig");
-    lua51_tests.setBuildMode(mode);
-    lua51_tests.setTarget(target);
-    lua51_tests.addOptions("build_options", lua51_tests_options);
-    lua51_tests.addPackagePath("zua", "src/zua.zig");
+    var lua51_tests = b.addTest(.{
+        .name = "test-lua51tests",
+        .root_source_file = .{ .path = "test/lua51_tests.zig" },
+        .target = target,
+        .optimize = mode,
+    });
+    lua51_tests.root_module.addOptions("build_options", lua51_tests_options);
+    lua51_tests.root_module.addImport("zua", zua);
+    const run_lua51_tests = b.addRunArtifact(lua51_tests);
     const lua51_tests_step = b.step("lua51_tests", "Run tests using the Lua 5.1 test files");
-    lua51_tests_step.dependOn(&lua51_tests.step);
+    lua51_tests_step.dependOn(&run_lua51_tests.step);
 }
 
-fn addLuaLibrary(b: *Builder, mode: std.builtin.Mode, target: std.zig.CrossTarget) *std.build.LibExeObjStep {
-    var lualib = b.addStaticLibrary("lua", null);
+fn addLuaLibrary(b: *std.Build, mode: std.builtin.OptimizeMode, target: std.Build.ResolvedTarget) *std.Build.Step.Compile {
+    var lualib = b.addStaticLibrary(.{
+        .name = "lua",
+        .target = target,
+        .optimize = mode,
+    });
     lualib.linkLibC();
-    lualib.setBuildMode(mode);
-    lualib.setTarget(target);
-    lualib.addIncludePath("lua-5.1/src");
-    lualib.addCSourceFiles(&.{
-        "lua-5.1/src/lapi.c",
-        "lua-5.1/src/lcode.c",
-        "lua-5.1/src/ldebug.c",
-        "lua-5.1/src/ldo.c",
-        "lua-5.1/src/ldump.c",
-        "lua-5.1/src/lfunc.c",
-        "lua-5.1/src/lgc.c",
-        "lua-5.1/src/llex.c",
-        "lua-5.1/src/lmem.c",
-        "lua-5.1/src/lobject.c",
-        "lua-5.1/src/lopcodes.c",
-        "lua-5.1/src/lparser.c",
-        "lua-5.1/src/lstate.c",
-        "lua-5.1/src/lstring.c",
-        "lua-5.1/src/ltable.c",
-        "lua-5.1/src/ltm.c",
-        "lua-5.1/src/lundump.c",
-        "lua-5.1/src/lvm.c",
-        "lua-5.1/src/lzio.c",
-        "lua-5.1/src/lauxlib.c",
-        "lua-5.1/src/lbaselib.c",
-        "lua-5.1/src/ldblib.c",
-        "lua-5.1/src/liolib.c",
-        "lua-5.1/src/lmathlib.c",
-        "lua-5.1/src/loslib.c",
-        "lua-5.1/src/ltablib.c",
-        "lua-5.1/src/lstrlib.c",
-        "lua-5.1/src/loadlib.c",
-        "lua-5.1/src/linit.c",
-    }, &.{"-std=gnu99"});
+    lualib.addIncludePath(.{ .path = "lua-5.1/src" });
+    lualib.addCSourceFiles(.{
+        .root = .{ .path = "lua-5.1/src" },
+        .files = &.{
+            "lapi.c",
+            "lcode.c",
+            "ldebug.c",
+            "ldo.c",
+            "ldump.c",
+            "lfunc.c",
+            "lgc.c",
+            "llex.c",
+            "lmem.c",
+            "lobject.c",
+            "lopcodes.c",
+            "lparser.c",
+            "lstate.c",
+            "lstring.c",
+            "ltable.c",
+            "ltm.c",
+            "lundump.c",
+            "lvm.c",
+            "lzio.c",
+            "lauxlib.c",
+            "lbaselib.c",
+            "ldblib.c",
+            "liolib.c",
+            "lmathlib.c",
+            "loslib.c",
+            "ltablib.c",
+            "lstrlib.c",
+            "loadlib.c",
+            "linit.c",
+        },
+        .flags = &.{"-std=gnu99"},
+    });
 
     return lualib;
 }

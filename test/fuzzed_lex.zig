@@ -32,7 +32,7 @@ test "fuzz_llex input/output pairs" {
     var n: usize = 0;
     var inputs_iterator = inputs_dir.iterate();
     while (try inputs_iterator.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         if (verboseTestPrinting) {
             std.debug.print("\n{s}\n", .{entry.name});
@@ -83,11 +83,11 @@ test "fuzz_llex input/output pairs" {
         if (verboseTestPrinting) {
             std.debug.print("\nexpected\n{s}\n", .{expectedContents});
         }
-        var nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
+        const nearIndex = std.mem.lastIndexOf(u8, expectedContents, " near '");
         if (nearIndex) |i| {
             try std.testing.expectEqualStrings(expectedContents[0..i], result_stream.getWritten()[0..i]);
             if (printErrorContextDifferences) {
-                var lastLineEnding = std.mem.lastIndexOf(u8, expectedContents, "\n").? + 1;
+                const lastLineEnding = std.mem.lastIndexOf(u8, expectedContents, "\n").? + 1;
                 const expectedError = expectedContents[lastLineEnding..];
                 const actualError = result_stream.getWritten()[lastLineEnding..];
                 if (!std.mem.eql(u8, expectedError, actualError)) {

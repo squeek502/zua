@@ -17,7 +17,9 @@ const inputs_dir_path = build_options.fuzzed_parse_inputs_dir;
 const outputs_dir_path = build_options.fuzzed_parse_outputs_dir;
 
 pub fn main() !void {
-    const allocator = std.testing.allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
+    const allocator = gpa.allocator();
 
     var inputs_dir = try std.fs.cwd().openDir(inputs_dir_path, .{ .iterate = true });
     defer inputs_dir.close();
@@ -29,7 +31,7 @@ pub fn main() !void {
 
     var inputs_iterator = inputs_dir.iterate();
     while (try inputs_iterator.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(contents);
@@ -77,7 +79,7 @@ pub fn main() !void {
 
 pub fn isInErrorSet(err: anyerror, comptime T: type) bool {
     for (std.meta.fields(T)) |field| {
-        if (std.mem.eql(u8, std.meta.tagName(err), field.name)) {
+        if (std.mem.eql(u8, @errorName(err), field.name)) {
             return true;
         }
     }

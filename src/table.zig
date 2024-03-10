@@ -46,7 +46,7 @@ pub const Table = struct {
                         const floatBits = @typeInfo(@TypeOf(val)).Float.bits;
                         const hashType = std.meta.Int(.unsigned, floatBits);
                         const autoHashFn = std.array_hash_map.getAutoHashFn(hashType, void);
-                        return autoHashFn({}, @bitCast(hashType, val));
+                        return autoHashFn({}, @bitCast(val));
                     },
                     .string, .table, .function, .userdata, .thread => {
                         // TODO
@@ -116,9 +116,9 @@ pub const Table = struct {
         }
         const float_val = key.number;
         // TODO: better handling of float vals that can't be converted to usize (out of range, negative, etc)
-        const int_val = @floatToInt(usize, float_val);
+        const int_val: usize = @intFromFloat(float_val);
         // must be positive and the float and int version of the key must be the same
-        if (int_val < 0 or @intToFloat(f64, int_val) != float_val) {
+        if (int_val < 0 or @as(f64, @floatFromInt(int_val)) != float_val) {
             return error.InvalidArrayKey;
         }
         return int_val;
@@ -219,7 +219,7 @@ pub const Table = struct {
         if (j > 0 and self.array.items[fromLuaIndex(j)] == .nil) {
             var i: usize = 0;
             while (j - i > 1) {
-                var m: usize = (i + j) / 2;
+                const m: usize = (i + j) / 2;
                 if (self.array.items[fromLuaIndex(m)] == .nil) {
                     j = m;
                 } else {
@@ -236,7 +236,7 @@ pub const Table = struct {
         // need to check the map portion for any remaining contiguous keys now
         var last_contiguous_i: usize = j;
         j += 1;
-        while (self.map.get(Value{ .number = @intToFloat(f64, j) })) |value| {
+        while (self.map.get(Value{ .number = @floatFromInt(j) })) |value| {
             if (value == .nil) {
                 break;
             }
@@ -265,7 +265,7 @@ pub const Table = struct {
             //   assert(#tbl == 2)
             if (j > std.math.maxInt(i32)) {
                 var i: usize = 1;
-                linear_search: while (self.get(Value{ .number = @intToFloat(f64, i) })) |linear_val| {
+                linear_search: while (self.get(Value{ .number = @floatFromInt(i) })) |linear_val| {
                     if (linear_val.* == Value.nil) {
                         break :linear_search;
                     }
@@ -275,8 +275,8 @@ pub const Table = struct {
             }
         }
         while (j - last_contiguous_i > 1) {
-            var m: usize = (last_contiguous_i + j) / 2;
-            if (self.map.get(Value{ .number = @intToFloat(f64, m) })) |value| {
+            const m: usize = (last_contiguous_i + j) / 2;
+            if (self.map.get(Value{ .number = @floatFromInt(m) })) |value| {
                 if (value != .nil) {
                     // if value is non-nil, then search values above
                     last_contiguous_i = m;
@@ -307,7 +307,7 @@ pub const Table = struct {
             const val = self.array.items[fromLuaIndex(next_i)];
             if (val != .nil) {
                 return Table.KV{
-                    .key = Value{ .number = @intToFloat(f64, next_i) },
+                    .key = Value{ .number = @floatFromInt(next_i) },
                     .value = val,
                 };
             }
@@ -323,7 +323,8 @@ pub const Table = struct {
                 };
             }
         } else {
-            const first_kv = self.map.iterator().next();
+            var it = self.map.iterator();
+            const first_kv = it.next();
             if (first_kv != null) {
                 return Table.KV{
                     .key = first_kv.?.key_ptr.*,
@@ -396,7 +397,7 @@ test "getn quirk 1" {
 
     var i: usize = 1;
     while (i <= 6) : (i += 1) {
-        const key = Value{ .number = @intToFloat(f64, i) };
+        const key = Value{ .number = @floatFromInt(i) };
         const val = tbl.get(key).?;
         val.* = key;
     }
@@ -426,7 +427,7 @@ test "getn quirk 2" {
 
     var i: usize = 1;
     while (i <= 5) : (i += 1) {
-        const key = Value{ .number = @intToFloat(f64, i) };
+        const key = Value{ .number = @floatFromInt(i) };
         const val = try tbl.getOrCreate(key);
         val.* = if (i != 3) key else Value.nil;
     }
@@ -452,8 +453,8 @@ test "getn quirk 2" {
     //   end
     i = 40;
     while (i < std.math.maxInt(i32)) : (i *= 2) {
-        const val = try tbl.getOrCreate(Value{ .number = @intToFloat(f64, i) });
-        val.* = Value{ .number = @intToFloat(f64, i) };
+        const val = try tbl.getOrCreate(Value{ .number = @floatFromInt(i) });
+        val.* = Value{ .number = @floatFromInt(i) };
     }
     //   assert(#tbl == 2)
     try std.testing.expectEqual(@as(usize, 2), tbl.getn());
@@ -465,7 +466,7 @@ test "getn quirk 2, next iterator" {
 
     var i: usize = 1;
     while (i <= 5) : (i += 1) {
-        const key = Value{ .number = @intToFloat(f64, i) };
+        const key = Value{ .number = @floatFromInt(i) };
         const val = try tbl.getOrCreate(key);
         val.* = if (i != 3) key else Value.nil;
     }
@@ -474,8 +475,8 @@ test "getn quirk 2, next iterator" {
 
     i = 10;
     while (i < std.math.maxInt(i32)) : (i *= 2) {
-        const val = try tbl.getOrCreate(Value{ .number = @intToFloat(f64, i) });
-        val.* = Value{ .number = @intToFloat(f64, i) };
+        const val = try tbl.getOrCreate(Value{ .number = @floatFromInt(i) });
+        val.* = Value{ .number = @floatFromInt(i) };
         expected_iterations += 1;
     }
 

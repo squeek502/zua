@@ -85,7 +85,7 @@ pub const OpCode = enum(u6) {
         var array: [max_fields]OpMode = undefined;
         for (@typeInfo(OpCode).Enum.fields) |field| {
             const Type = @field(OpCode, field.name).InstructionType();
-            const mode: OpMode = switch (@typeInfo(Type).Struct.fields[0].field_type) {
+            const mode: OpMode = switch (@typeInfo(Type).Struct.fields[0].type) {
                 Instruction.ABC => .iABC,
                 Instruction.ABx => .iABx,
                 Instruction.AsBx => .iAsBx,
@@ -97,7 +97,7 @@ pub const OpCode = enum(u6) {
     };
 
     pub fn getOpMode(self: OpCode) OpMode {
-        return op_modes[@enumToInt(self)];
+        return op_modes[@intFromEnum(self)];
     }
 
     pub const OpArgMask = enum {
@@ -126,22 +126,22 @@ pub const OpCode = enum(u6) {
     };
 
     pub fn getBMode(self: OpCode) OpArgMask {
-        return op_meta[@enumToInt(self)].b_mode;
+        return op_meta[@intFromEnum(self)].b_mode;
     }
 
     pub fn getCMode(self: OpCode) OpArgMask {
-        return op_meta[@enumToInt(self)].c_mode;
+        return op_meta[@intFromEnum(self)].c_mode;
     }
 
     /// If true, the instruction will set the register index specified in its `A` value
     pub fn setsRegisterInA(self: OpCode) bool {
-        return op_meta[@enumToInt(self)].sets_register_in_a;
+        return op_meta[@intFromEnum(self)].sets_register_in_a;
     }
 
     // TODO rename
     /// operator is a test
     pub fn testTMode(self: OpCode) bool {
-        return op_meta[@enumToInt(self)].test_t_mode;
+        return op_meta[@intFromEnum(self)].test_t_mode;
     }
 };
 
@@ -242,12 +242,12 @@ pub const Instruction = packed struct {
 
         pub fn unsignedBxToSigned(Bx: u18) i18 {
             const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
-            return @intCast(i18, @intCast(fitting_int, Bx) - max_sbx);
+            return @intCast(@as(fitting_int, @intCast(Bx)) - max_sbx);
         }
 
         pub fn signedBxToUnsigned(sBx: i18) u18 {
             const fitting_int = std.math.IntFittingRange(min_sbx, ABx.max_bx);
-            return @intCast(u18, @intCast(fitting_int, sBx) + max_sbx);
+            return @intCast(@as(fitting_int, @intCast(sBx)) + max_sbx);
         }
     };
 
@@ -302,8 +302,8 @@ pub const Instruction = packed struct {
                 .instruction = Instruction.ABC.init(
                     .loadbool,
                     result_reg,
-                    @boolToInt(val),
-                    @boolToInt(does_jump),
+                    @intFromBool(val),
+                    @intFromBool(does_jump),
                 ),
             };
         }
@@ -341,7 +341,7 @@ pub const Instruction = packed struct {
         }
 
         pub fn assignsToMultipleRegisters(self: LoadNil) bool {
-            return self.instruction.a != @truncate(u8, self.instruction.b);
+            return self.instruction.a != @as(u8, @truncate(self.instruction.b));
         }
 
         pub fn willAssignToRegister(self: LoadNil, reg: u8) bool {
@@ -451,11 +451,11 @@ pub const Instruction = packed struct {
         };
 
         pub fn setArraySize(self: *NewTable, num: zua.object.FloatingPointByteIntType) void {
-            self.instruction.b = @intCast(u9, zua.object.intToFloatingPointByte(num));
+            self.instruction.b = @intCast(zua.object.intToFloatingPointByte(num));
         }
 
         pub fn setTableSize(self: *NewTable, num: zua.object.FloatingPointByteIntType) void {
-            self.instruction.c = @intCast(u9, zua.object.intToFloatingPointByte(num));
+            self.instruction.c = @intCast(zua.object.intToFloatingPointByte(num));
         }
     };
 
@@ -622,7 +622,7 @@ pub const Instruction = packed struct {
 
         pub fn init(offset: ?i18) Jump {
             const instruction = Instruction.AsBx.init(.jmp, 0, 0);
-            var jmp = @bitCast(Jump, instruction);
+            var jmp: Jump = @bitCast(instruction);
             jmp.setOffset(offset);
             return jmp;
         }
@@ -653,7 +653,7 @@ pub const Instruction = packed struct {
             // any instruction, so we'd actually end up at 3
             //
             // TODO better understand why this + 1 exists/verify the above
-            return @intCast(usize, @intCast(isize, pc + 1) + offset);
+            return @intCast(@as(isize, @intCast(pc + 1)) + offset);
         }
     };
 
@@ -800,9 +800,9 @@ pub const Instruction = packed struct {
         /// (as a bare u32)
         pub fn init(table_reg: u8, num_values: usize, to_store: ?usize) SetList {
             const flush_batch_num: usize = SetList.numValuesToFlushBatchNum(num_values);
-            const num_values_in_batch: u9 = if (to_store == null) 0 else @intCast(u9, to_store.?);
-            const c_val = if (flush_batch_num <= Instruction.ABC.max_c)
-                @intCast(u9, flush_batch_num)
+            const num_values_in_batch: u9 = if (to_store == null) 0 else @intCast(to_store.?);
+            const c_val: u9 = if (flush_batch_num <= Instruction.ABC.max_c)
+                @intCast(flush_batch_num)
             else
                 batch_num_in_next_instruction;
 

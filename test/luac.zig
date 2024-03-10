@@ -23,10 +23,7 @@ const lua_State = extern struct {
 };
 
 pub fn loadAndDumpAlloc(allocator: Allocator, chunk: [:0]const u8) ![]const u8 {
-    _ = allocator;
-    _ = chunk;
-
-    var L: *c.lua_State = open: {
+    const L: *c.lua_State = open: {
         break :open c.lua_open() orelse return error.OutOfMemory;
     };
     defer c.lua_close(L);
@@ -41,7 +38,7 @@ pub fn loadAndDumpAlloc(allocator: Allocator, chunk: [:0]const u8) ![]const u8 {
     std.debug.assert(c.lua_type(L, -1) == c.LUA_TFUNCTION);
 
     // get the proto (this should be equivalent to `toproto(L,-1)` in luac.c)
-    const concrete_state = @ptrCast(*lua_State, @alignCast(8, L));
+    const concrete_state: *lua_State = @ptrCast(@alignCast(L));
     const first_free_slot_in_stack = concrete_state.top;
     const top_of_stack: *c.lua_TValue = first_free_slot_in_stack - 1;
     const gc: *c.GCObject = top_of_stack.value.gc;
@@ -72,8 +69,8 @@ fn luaWriterArrayList(
     ud: ?*anyopaque,
 ) callconv(.C) c_int {
     _ = L;
-    var array_list = @ptrCast(*std.ArrayList(u8), @alignCast(@alignOf(*std.ArrayList(u8)), ud.?));
-    var slice = @ptrCast([*]const u8, p.?)[0..sz];
+    var array_list: *std.ArrayList(u8) = @ptrCast(@alignCast(ud.?));
+    const slice = @as([*]const u8, @ptrCast(p.?))[0..sz];
     array_list.appendSlice(slice) catch return 1;
     return 0;
 }

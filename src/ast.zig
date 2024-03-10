@@ -445,7 +445,7 @@ pub const Node = struct {
                 }
                 try writer.writeByteNTimes(' ', indent + 1);
                 try writer.writeAll("(");
-                for (func.parameters) |param, i| {
+                for (func.parameters, 0..) |param, i| {
                     if (i != 0) try writer.writeAll(" ");
                     try writer.writeAll(param.nameForDisplay());
                 }

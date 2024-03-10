@@ -28,7 +28,7 @@ test "bench fuzz_llex inputs" {
     const num_iterations = 1000;
     var inputs_iterator = inputs_dir.iterate();
     while (try inputs_iterator.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(contents);
@@ -49,7 +49,7 @@ test "bench fuzz_llex inputs" {
         time += endMeasure(num_iterations);
         n += 1;
     }
-    std.debug.print("Lexed {} files in {}ns ({d}ms)\n", .{ n, time, @intToFloat(f64, time) / (std.time.ns_per_s / std.time.ms_per_s) });
+    std.debug.print("Lexed {} files in {}ns ({d}ms)\n", .{ n, time, @as(f64, @floatFromInt(time)) / (std.time.ns_per_s / std.time.ms_per_s) });
 }
 
 fn beginMeasure() void {

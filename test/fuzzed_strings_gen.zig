@@ -14,7 +14,9 @@ const inputs_dir_path = build_options.fuzzed_lex_inputs_dir;
 const outputs_dir_path = build_options.fuzzed_strings_gen_dir;
 
 pub fn main() !void {
-    var allocator = std.testing.allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
+    const allocator = gpa.allocator();
 
     // clean the outputs dir
     std.fs.cwd().deleteTree(outputs_dir_path) catch |err| switch (err) {
@@ -31,7 +33,7 @@ pub fn main() !void {
     var n: usize = 0;
     var inputs_iterator = inputs_dir.iterate();
     while (try inputs_iterator.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         const contents = try inputs_dir.readFileAlloc(allocator, entry.name, std.math.maxInt(usize));
         defer allocator.free(contents);

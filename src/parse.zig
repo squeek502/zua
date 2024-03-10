@@ -597,7 +597,7 @@ pub const Parser = struct {
 
     /// listfield -> expr
     fn listfield(self: *Self) Error!*Node {
-        var value = try self.expr();
+        const value = try self.expr();
         var node = try self.state.arena.create(Node.TableField);
         node.* = .{
             .key = null,
@@ -608,7 +608,7 @@ pub const Parser = struct {
 
     /// recfield -> (NAME | `['exp1`]') = exp1
     fn recfield(self: *Self) Error!*Node {
-        var key: *Node = get_key: {
+        const key: *Node = get_key: {
             if (self.state.token.id == .name) {
                 const name_token = try self.checkname();
                 // This might be kinda weird, but the name token here is actually used as
@@ -650,7 +650,7 @@ pub const Parser = struct {
         defer fields.deinit();
 
         while (!self.state.token.isChar('}')) {
-            var field: *Node = get_field: {
+            const field: *Node = get_field: {
                 switch (self.state.token.id) {
                     .name => {
                         // TODO presumably should catch EOF or errors here and translate them to more appropriate errors
@@ -763,7 +763,7 @@ pub const Parser = struct {
     }
 
     fn explist1(self: *Self, list: *std.ArrayList(*Node)) Error!usize {
-        var num_expressions: usize = 1;
+        const num_expressions: usize = 1;
         try list.append(try self.expr());
         while (try self.testcharnext(',')) {
             try list.append(try self.expr());
@@ -816,7 +816,7 @@ pub const Parser = struct {
             if (isUnaryOperator(self.state.token)) {
                 const unary_token = self.state.token;
                 try self.nextToken();
-                var argument_expr = try self.subexpr(unary_priority);
+                const argument_expr = try self.subexpr(unary_priority);
 
                 const unary_node = try self.state.arena.create(Node.UnaryExpression);
                 unary_node.* = .{
@@ -835,7 +835,7 @@ pub const Parser = struct {
             if (priority.left <= limit) break;
 
             try self.nextToken();
-            var right_expr = try self.subexpr(priority.right);
+            const right_expr = try self.subexpr(priority.right);
 
             const new_node = try self.state.arena.create(Node.BinaryExpression);
             new_node.* = .{

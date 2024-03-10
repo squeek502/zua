@@ -5,6 +5,7 @@ const Instruction = opcodes.Instruction;
 const object = @import("object.zig");
 const Function = object.Function;
 const Constant = object.Constant;
+const native_endian = builtin.cpu.arch.endian();
 
 pub const signature = "\x1BLua";
 pub const luac_version: u8 = 0x51;
@@ -23,32 +24,32 @@ pub fn writeHeader(writer: anytype) @TypeOf(writer).Error!void {
     try writer.writeAll(signature);
     try writer.writeByte(luac_version);
     try writer.writeByte(luac_format);
-    try writer.writeByte(@boolToInt(builtin.target.cpu.arch.endian() == .Little));
+    try writer.writeByte(@intFromBool(builtin.target.cpu.arch.endian() == .little));
     try writer.writeByte(@sizeOf(c_int));
     try writer.writeByte(@sizeOf(usize));
     try writer.writeByte(@sizeOf(opcodes.Instruction));
     try writer.writeByte(@sizeOf(f64)); // sizeof(lua_Number)
-    try writer.writeByte(@boolToInt(false)); // is lua_Number an integer type?
+    try writer.writeByte(@intFromBool(false)); // is lua_Number an integer type?
 }
 
 pub fn writeFunction(function: Function, writer: anytype) @TypeOf(writer).Error!void {
     // source info
     const chunk_name: ?[]const u8 = if (strip_debug_info) null else function.name;
     try writeString(chunk_name, writer);
-    try writer.writeIntNative(c_int, 0); // TODO: line defined
-    try writer.writeIntNative(c_int, 0); // TODO: last line defined
+    try writer.writeInt(c_int, 0, native_endian); // TODO: line defined
+    try writer.writeInt(c_int, 0, native_endian); // TODO: last line defined
     try writer.writeByte(function.num_upvalues);
     try writer.writeByte(function.num_params);
     try writer.writeByte(function.varargs.dump());
     try writer.writeByte(function.max_stack_size);
 
     // instructions
-    try writer.writeIntNative(c_int, @intCast(c_int, function.code.len));
+    try writer.writeInt(c_int, @intCast(function.code.len), native_endian);
     try writer.writeAll(std.mem.sliceAsBytes(function.code));
 
     // constants
     // number of constants
-    try writer.writeIntNative(c_int, @intCast(c_int, function.constants.len));
+    try writer.writeInt(c_int, @intCast(function.constants.len), native_endian);
     // each constant is dumped as a byte for its type followed by a dump of the value
     for (function.constants) |constant| {
         switch (constant) {
@@ -65,28 +66,28 @@ pub fn writeFunction(function: Function, writer: anytype) @TypeOf(writer).Error!
             },
             .boolean => |val| {
                 try writer.writeByte(object.Value.Type.boolean.bytecodeId());
-                try writer.writeByte(@boolToInt(val));
+                try writer.writeByte(@intFromBool(val));
             },
         }
     }
     // number of functions
-    try writer.writeIntNative(c_int, 0);
+    try writer.writeInt(c_int, 0, native_endian);
     // TODO: functions
 
     // debug
-    try writer.writeIntNative(c_int, 0); // TODO: sizelineinfo
+    try writer.writeInt(c_int, 0, native_endian); // TODO: sizelineinfo
     // TODO: lineinfo
-    try writer.writeIntNative(c_int, 0); // TODO: sizelocvars
+    try writer.writeInt(c_int, 0, native_endian); // TODO: sizelocvars
     // TODO: locvars
-    try writer.writeIntNative(c_int, 0); // TODO: sizeupvalues
+    try writer.writeInt(c_int, 0, native_endian); // TODO: sizeupvalues
     // TODO: upvalues
 }
 
 pub fn writeString(string: ?[]const u8, writer: anytype) @TypeOf(writer).Error!void {
     if (string == null) {
-        try writer.writeIntNative(usize, 0);
+        try writer.writeInt(usize, 0, native_endian);
     } else {
-        try writer.writeIntNative(usize, string.?.len + 1);
+        try writer.writeInt(usize, string.?.len + 1, native_endian);
         try writer.writeAll(string.?);
         try writer.writeByte(0);
     }
@@ -103,10 +104,10 @@ test "just return" {
     var buf = std.ArrayList(u8).init(std.testing.allocator);
     defer buf.deinit();
 
-    var chunk = Function{
+    const chunk = Function{
         .name = "",
         .code = &[_]Instruction{
-            @bitCast(Instruction, Instruction.ABC.init(.@"return", 0, 1, 0)),
+            @bitCast(Instruction.ABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{},
         .max_stack_size = 0,
@@ -119,14 +120,14 @@ test "hello world" {
     var buf = std.ArrayList(u8).init(std.testing.allocator);
     defer buf.deinit();
 
-    var chunk = Function{
+    const chunk = Function{
         .allocator = null,
         .name = "",
         .code = &[_]Instruction{
-            @bitCast(Instruction, Instruction.ABx.init(.getglobal, 0, 0)),
-            @bitCast(Instruction, Instruction.ABx.init(.loadk, 1, 1)),
-            @bitCast(Instruction, Instruction.ABC.init(.call, 0, 2, 1)),
-            @bitCast(Instruction, Instruction.ABC.init(.@"return", 0, 1, 0)),
+            @bitCast(Instruction.ABx.init(.getglobal, 0, 0)),
+            @bitCast(Instruction.ABx.init(.loadk, 1, 1)),
+            @bitCast(Instruction.ABC.init(.call, 0, 2, 1)),
+            @bitCast(Instruction.ABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{
             Constant{ .string = "print" },
@@ -142,11 +143,11 @@ test "constants" {
     var buf = std.ArrayList(u8).init(std.testing.allocator);
     defer buf.deinit();
 
-    var chunk = Function{
+    const chunk = Function{
         .allocator = null,
         .name = "",
         .code = &[_]Instruction{
-            @bitCast(Instruction, Instruction.ABC.init(.@"return", 0, 1, 0)),
+            @bitCast(Instruction.ABC.init(.@"return", 0, 1, 0)),
         },
         .constants = &[_]Constant{
             Constant{ .string = "print" },

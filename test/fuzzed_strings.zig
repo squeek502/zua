@@ -30,7 +30,7 @@ test "string input/output pairs" {
     var n: usize = 0;
     var inputs_iterator = inputs_dir.iterate();
     while (try inputs_iterator.next()) |entry| {
-        if (entry.kind != .File) continue;
+        if (entry.kind != .file) continue;
 
         if (verboseTestPrinting) {
             std.debug.print("\n{s}\n", .{entry.name});
@@ -50,7 +50,7 @@ test "string input/output pairs" {
             if (token.id != lex.Token.Id.string) continue;
 
             const string_source = contents[token.start..token.end];
-            var buf = try allocator.alloc(u8, string_source.len);
+            const buf = try allocator.alloc(u8, string_source.len);
             defer allocator.free(buf);
             const parsed = parseString(string_source, buf);
             if (verboseTestPrinting) {
